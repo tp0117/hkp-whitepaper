@@ -13,7 +13,7 @@ try:
     import docx
     from docx.shared import Inches, Pt, RGBColor
     from docx.enum.text import WD_ALIGN_PARAGRAPH
-except ImportError:
+except Exception:
     docx = None
 
 # Helper 函數：僅用於身份證號碼尾數加上圓括號，如 G111759(8)
@@ -126,113 +126,118 @@ statement = st.text_area("請輸入額外口供、酒精測試結果或補充資
 def generate_tado_word(data, statement_text):
     if not docx:
         return None
-    doc = docx.Document()
-    
-    # 標題
-    h = doc.add_heading('交通意外 (TADO) 附錄報告', level=1)
-    h.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    
-    vehicles = data.get('vehicles', [])
-    veh_labels = ["甲", "乙", "丙", "丁", "戊"]
-    
-    # 車輛及司機資料逐一生成
-    for idx, v in enumerate(vehicles):
-        label_char = veh_labels[idx] if idx < len(veh_labels) else str(idx + 1)
-        doc.add_heading(f"車輛{label_char}：", level=2)
+    try:
+        doc = docx.Document()
         
-        p = doc.add_paragraph()
-        p.paragraph_format.line_spacing = 1.2
+        # 標題
+        h = doc.add_heading('交通意外 (TADO) 附錄報告', level=1)
+        if hasattr(WD_ALIGN_PARAGRAPH, 'CENTER'):
+            h.alignment = WD_ALIGN_PARAGRAPH.CENTER
         
-        # 1) 車牌 (含尾數)
-        plate = v.get('plate_no', '———')
-        p.add_run(f"1）車牌： ").bold = True
-        p.add_run(f"{plate}\n")
+        vehicles = data.get('vehicles', [])
+        veh_labels = ["甲", "乙", "丙", "丁", "戊"]
         
-        # 2) 車輛類型 (英/中)
-        v_class_en = v.get('vehicle_class_en', v.get('vehicle_class', '———'))
-        v_class_zh = v.get('vehicle_class_zh', '———')
-        v_type_str = f"{v_class_en} / {v_class_zh}" if v_class_zh != '———' else v_class_en
-        p.add_run(f"2）車輛類型： ").bold = True
-        p.add_run(f"{v_type_str}\n")
-        
-        # 3) 總重量 (私家車/電單車為 ———，貨車填重量如 5.5T)
-        weight = v.get('gross_weight', '———')
-        p.add_run(f"3）總重量： ").bold = True
-        p.add_run(f"{weight}\n")
-        
-        # 4) 廠名
-        make = v.get('make', '———')
-        p.add_run(f"4）廠名： ").bold = True
-        p.add_run(f"{make}\n")
-        
-        # 5) 顏色
-        color = v.get('color', '———')
-        p.add_run(f"5）顏色： ").bold = True
-        p.add_run(f"{color}\n")
-        
-        # 6) 存檔編號 (Transaction No.)
-        trans_no = v.get('transaction_no', '———')
-        p.add_run(f"6）存檔編號： ").bold = True
-        p.add_run(f"{trans_no}\n")
-        
-        # 7) 屆滿日期 (無則 ———)
-        exp = v.get('expiry_date', '———')
-        p.add_run(f"7）屆滿日期： ").bold = True
-        p.add_run(f"{exp}\n")
-        
-        # 8) 駕駛人 (英文名及中文名)
-        d_en = v.get('driver_name_en', '')
-        d_zh = v.get('driver_name_zh', '')
-        driver_str = f"{d_en} ({d_zh})" if d_zh else (d_en if d_en else '———')
-        p.add_run(f"8）駕駛人： ").bold = True
-        p.add_run(f"{driver_str}\n")
-        
-        # 9) 駕駛執照號碼 (保持原樣，不加尾數括號)
-        lic_no = v.get('driving_license_no', '———')
-        p.add_run(f"9）駕駛執照號碼： ").bold = True
-        p.add_run(f"{lic_no}\n")
-        
-        # 10) 地址 (中英文雙向翻譯)
-        addr_zh = v.get('address_zh', '———')
-        addr_en = v.get('address_en', '———')
-        p.add_run(f"10）地址： ").bold = True
-        p.add_run(f"\n   中文：{addr_zh}\n   英文：{addr_en}\n")
-        
-        # 11) 電話號碼
-        phone = v.get('phone', '———')
-        p.add_run(f"11）電話號碼： ").bold = True
-        p.add_run(f"{phone}\n")
-        
-        # 12) 車輛損毀情況
-        damage = v.get('damage', '———')
-        p.add_run(f"12）車輛損毀情況： ").bold = True
-        p.add_run(f"{damage}\n")
-        
-        # 13) 司機口供
-        d_statement = v.get('driver_statement', statement_text if statement_text else '———')
-        p.add_run(f"13）司機口供： ").bold = True
-        p.add_run(f"{d_statement}\n")
+        # 車輛及司機資料逐一生成
+        for idx, v in enumerate(vehicles):
+            label_char = veh_labels[idx] if idx < len(veh_labels) else str(idx + 1)
+            doc.add_heading(f"車輛{label_char}：", level=2)
+            
+            p = doc.add_paragraph()
+            p.paragraph_format.line_spacing = 1.2
+            
+            # 1) 車牌 (含尾數)
+            plate = v.get('plate_no', '———')
+            p.add_run(f"1）車牌： ").bold = True
+            p.add_run(f"{plate}\n")
+            
+            # 2) 車輛類型 (英/中)
+            v_class_en = v.get('vehicle_class_en', v.get('vehicle_class', '———'))
+            v_class_zh = v.get('vehicle_class_zh', '———')
+            v_type_str = f"{v_class_en} / {v_class_zh}" if v_class_zh != '———' else v_class_en
+            p.add_run(f"2）車輛類型： ").bold = True
+            p.add_run(f"{v_type_str}\n")
+            
+            # 3) 總重量 (私家車/電單車為 ———，貨車填重量如 5.5T)
+            weight = v.get('gross_weight', '———')
+            p.add_run(f"3）總重量： ").bold = True
+            p.add_run(f"{weight}\n")
+            
+            # 4) 廠名
+            make = v.get('make', '———')
+            p.add_run(f"4）廠名： ").bold = True
+            p.add_run(f"{make}\n")
+            
+            # 5) 顏色
+            color = v.get('color', '———')
+            p.add_run(f"5）顏色： ").bold = True
+            p.add_run(f"{color}\n")
+            
+            # 6) 存檔編號 (Transaction No.)
+            trans_no = v.get('transaction_no', '———')
+            p.add_run(f"6）存檔編號： ").bold = True
+            p.add_run(f"{trans_no}\n")
+            
+            # 7) 屆滿日期 (無則 ———)
+            exp = v.get('expiry_date', '———')
+            p.add_run(f"7）屆滿日期： ").bold = True
+            p.add_run(f"{exp}\n")
+            
+            # 8) 駕駛人 (英文名及中文名)
+            d_en = v.get('driver_name_en', '')
+            d_zh = v.get('driver_name_zh', '')
+            driver_str = f"{d_en} ({d_zh})" if d_zh else (d_en if d_en else '———')
+            p.add_run(f"8）駕駛人： ").bold = True
+            p.add_run(f"{driver_str}\n")
+            
+            # 9) 駕駛執照號碼 (保持原樣，不加尾數括號)
+            lic_no = v.get('driving_license_no', '———')
+            p.add_run(f"9）駕駛執照號碼： ").bold = True
+            p.add_run(f"{lic_no}\n")
+            
+            # 10) 地址 (中英文雙向翻譯)
+            addr_zh = v.get('address_zh', '———')
+            addr_en = v.get('address_en', '———')
+            p.add_run(f"10）地址： ").bold = True
+            p.add_run(f"\n   中文：{addr_zh}\n   英文：{addr_en}\n")
+            
+            # 11) 電話號碼
+            phone = v.get('phone', '———')
+            p.add_run(f"11）電話號碼： ").bold = True
+            p.add_run(f"{phone}\n")
+            
+            # 12) 車輛損毀情況
+            damage = v.get('damage', '———')
+            p.add_run(f"12）車輛損毀情況： ").bold = True
+            p.add_run(f"{damage}\n")
+            
+            # 13) 司機口供
+            d_statement = v.get('driver_statement', statement_text if statement_text else '———')
+            p.add_run(f"13）司機口供： ").bold = True
+            p.add_run(f"{d_statement}\n")
 
-    # 結尾：警方資料及酒精呼氣測試
-    doc.add_heading("警方資料及測試紀錄：", level=2)
-    p_police = doc.add_paragraph()
-    p_police.paragraph_format.line_spacing = 1.2
-    
-    police_veh = data.get('police_veh_no', '———')
-    police_officer = data.get('police_no', '———')
-    rn_no = data.get('rn_no', '———')
-    pbt = data.get('breathalyzer_test', '未有提供 / 無紀錄')
-    
-    p_police.add_run(f"• 警車車牌： ").bold = True
-    p_police.add_run(f"{police_veh}\n")
-    p_police.add_run(f"• 到場警員： ").bold = True
-    p_police.add_run(f"{police_officer}\n")
-    p_police.add_run(f"• 報案號碼 (RN)： ").bold = True
-    p_police.add_run(f"{rn_no}\n")
-    p_police.add_run(f"• 酒精呼氣測試 (PBT)： ").bold = True
-    p_police.add_run(f"{pbt}\n")
+        # 結尾：警方資料及酒精呼氣測試
+        doc.add_heading("警方資料及測試紀錄：", level=2)
+        p_police = doc.add_paragraph()
+        p_police.paragraph_format.line_spacing = 1.2
+        
+        police_veh = data.get('police_veh_no', '———')
+        police_officer = data.get('police_no', '———')
+        rn_no = data.get('rn_no', '———')
+        pbt = data.get('breathalyzer_test', '未有提供 / 無紀錄')
+        
+        p_police.add_run(f"• 警車車牌： ").bold = True
+        p_police.add_run(f"{police_veh}\n")
+        p_police.add_run(f"• 到場警員： ").bold = True
+        p_police.add_run(f"{police_officer}\n")
+        p_police.add_run(f"• 報案號碼 (RN)： ").bold = True
+        p_police.add_run(f"{rn_no}\n")
+        p_police.add_run(f"• 酒精呼氣測試 (PBT)： ").bold = True
+        p_police.add_run(f"{pbt}\n")
 
-    return doc
+        return doc
+    except Exception as err:
+        st.error(f"建立 Word 文件時發生錯誤：{str(err)}")
+        return None
 
 # 生成按鈕
 button_label = "🚀 立即生成 Excel 白皮書" if "TAPI" in app_mode else "📄 立即生成 Word 附錄報告"
@@ -329,7 +334,7 @@ if st.button(button_label):
                             "make": "車輛廠名 (如 TOYOTA)",
                             "color": "車輛顏色 (如 SILVER-VAR)",
                             "transaction_no": "存檔編號 C06-0123",
-                            "expiry_date": "行車證期滿日期 (無則 ———)",
+                            "expiry_date": "屆滿日期 (無則 ———)",
                             "seating_capacity": "載客額 (如 5)",
                             "damage": "車輛損毀情況",
                             "driver_name_en": "司機英文姓名",
@@ -489,7 +494,7 @@ if st.button(button_label):
                         ws_police.cell(row=5, column=1, value=f"現場紀錄及司機口供：\n{statement}")
                     
                     wb.save(output_path)
-                    st.success(f"🎉 TAPI 白皮書生成成功！(已完美補上駕駛執照期滿日期 E21/E36！)")
+                    st.success(f"🎉 TAPI 白皮書生成成功！(模型：{used_model_name})")
                     
                     with open(output_path, "rb") as file:
                         st.download_button(
@@ -504,20 +509,23 @@ if st.button(button_label):
                 else:
                     # 生成 TADO Word 附錄
                     doc_obj = generate_tado_word(data, statement)
-                    output_word_path = f"TADO_附錄報告_{first_plate}.docx"
-                    doc_obj.save(output_word_path)
-                    
-                    st.success(f"🎉 TADO Word 附錄生成成功！(模型：{used_model_name})")
-                    
-                    with open(output_word_path, "rb") as file:
-                        st.download_button(
-                            label="📥 下載 Word 附錄報告 (.docx)",
-                            data=file,
-                            file_name=output_word_path,
-                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                        )
-                    if os.path.exists(output_word_path):
-                        os.remove(output_word_path)
+                    if doc_obj is None:
+                        st.error("⚠️ 無法建立 Word 檔案！請確定 GitHub 的 requirements.txt 已加入 python-docx 套件，並且 Streamlit 已完成重新部署。")
+                    else:
+                        output_word_path = f"TADO_附錄報告_{first_plate}.docx"
+                        doc_obj.save(output_word_path)
+                        
+                        st.success(f"🎉 TADO Word 附錄生成成功！(模型：{used_model_name})")
+                        
+                        with open(output_word_path, "rb") as file:
+                            st.download_button(
+                                label="📥 下載 Word 附錄報告 (.docx)",
+                                data=file,
+                                file_name=output_word_path,
+                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                            )
+                        if os.path.exists(output_word_path):
+                            os.remove(output_word_path)
                 
             except Exception as e:
                 st.error(f"發生錯誤：{str(e)}")
