@@ -5,6 +5,7 @@ from google.genai import types
 import json
 import os
 import time
+import re
 from PIL import Image
 
 # 嘗試載入 python-docx 用於生成 Word 檔
@@ -14,6 +15,20 @@ try:
     from docx.enum.text import WD_ALIGN_PARAGRAPH
 except ImportError:
     docx = None
+
+# Helper 函數：自動確保身份證 / 駕照號碼尾數加上圓括號，如 G111759(8) 或 Y463269(7)
+def format_hkid_parentheses(code_str):
+    if not code_str:
+        return ""
+    s = str(code_str).strip()
+    # 若已經有尾數括號 (X) 則直接傳回
+    if re.search(r'\([0-9A-Za-z]\)$', s):
+        return s
+    # 比對前面 7-8 位號碼 + 最後一位校驗碼 (如 G111759 8, G1117598, Y463269-7)
+    match = re.match(r'^([A-Za-z]{1,2}\d{6})[\s\-_]?([0-9A-Za-z])$', s)
+    if match:
+        return f"{match.group(1)}({match.group(2)})"
+    return s
 
 # 網頁標題及頁面設定
 st.set_page_config(page_title="交通意外資料處理系統 (TAPI/TADO)", page_icon="🚓", layout="wide")
@@ -172,8 +187,8 @@ def generate_tado_word(data, statement_text):
         p.add_run(f"8）駕駛人： ").bold = True
         p.add_run(f"{driver_str}\n")
         
-        # 9) 駕駛執照號碼
-        lic_no = v.get('driving_license_no', '———')
+        # 9) 駕駛執照號碼 (格式化括號)
+        lic_no = format_hkid_parentheses(v.get('driving_license_no', '———'))
         p.add_run(f"9）駕駛執照號碼： ").bold = True
         p.add_run(f"{lic_no}\n")
         
@@ -243,7 +258,7 @@ if st.button(button_label):
     elif not images_with_tags and not statement:
         st.error("請最少上載一張相片或輸入文字資料！")
     else:
-        with st.spinner('AI 正在全方位辨識（自動精準對齊警察編號、隧道時間、傷者資料）...'):
+        with st.spinner('AI 正在進行中英地址雙向翻譯、身份證號碼尾數括號修飾與全方位對齊...'):
             try:
                 client = genai.Client(api_key=api_key.strip())
                 raw_images = [item[0] for item in images_with_tags]
@@ -259,43 +274,43 @@ if st.button(button_label):
                 【補充文字內容與口供】：
                 {statement}
                 
+                【🌐 地址雙向翻譯強制要求 (100% 必須完成)】：
+                1. 司機及傷者的住址：相片中不論提供的是中文住址還是英文住址，你必須同時生成：
+                   - address_zh：完整繁體中文住址 (若原本是英文，必須精準翻譯成繁體中文)。
+                   - address_en：完整英文住址 (若原本是中文，必須精準翻譯成英文)。
+                2. 絕對不可留空或填寫 N/A！兩者必須同時填滿。
+                
+                【🆔 身份證與駕駛執照尾數括號強制要求】：
+                1. 身份證號碼 (hkid) 與 駕駛執照號碼 (driving_license_no)：最後一個校驗碼數字或字母必須使用圓括號 ( ) 括住，例如 G111759(8) 或 Y463269(7)。
+                
                 【嚴格警察與時間資料拆解要求】：
                 1. police_no（普通警員編號）：只提取軍裝/普通警員編號 (如 SPC 99088, PC 81818)。【絕對不可填入 AI 警員編號，更不可包含 AM 車牌】。
                 2. ai_staff_no（AI 人員編號）：交通意外調查組人員編號 (如 12345)。【必須與普通警員編號完全分開】。
                 3. tunnel_staff_arrived: 隧道職員到達時間。
                 4. tunnel_staff_departed: 隧道職員離開時間 / All Departed 時間。
-                5. police_arrived_time: 警察到達時間。
-                6. ai_arrived_time: HKP AI 到達時間。
-                7. ai_departed_time: HKP AI 離開時間。
                 
-                【車輛與司機細節】：
-                1. seating_capacity: 車輛載客額數字 (如 5 或 4)。
-                2. dl_class: 駕駛執照「正式執照 Full class」欄位內的數字類別 (如 1, 2 或 1, 2, 18)。
-                3. gross_weight: 總重量 (私家車/電單車填 "———"，貨車填如 "5.5T")。
-                
-                【受傷者 (Injured) 詳細資料提取要求】：
-                請仔細讀取相片中關於「受傷者/傷者」的任何文字紀錄，提取以下內容：
+                【受傷者 (Injured) 詳細資料與電話號碼提取】：
                 1. injured_total: 受傷者合共人數 (無人受傷填 "0")。
-                2. injured_list: 傷者列表陣列 (最多 4 人)，包含：
+                2. injured_list: 傷者列表陣列 (最多 4 人)，必須完整提取：
                    - name_en: 傷者英文姓名
                    - name_zh: 傷者中文姓名
                    - age: 年齡
-                   - address_zh: 中文住址
-                   - address_en: 英文住址
-                   - phone: 電話號碼
-                   - vehicle_no: 涉及車牌號碼 (Vehicle Number)
+                   - address_zh: 完整中文住址 (需雙向翻譯)
+                   - address_en: 完整英文住址 (需雙向翻譯)
+                   - phone: 傷者電話號碼 (必須照實提取，不可遺漏)
+                   - vehicle_no: 涉及車牌號碼
                    - hospital: 送往醫院
                    - escort: 護送人/遞送人
                 
                 請嚴格以 JSON 格式輸出：
                 {{
-                    "log_no": "Log No 紀錄號碼 (無則留空)",
+                    "log_no": "Log No 紀錄號碼",
                     "rn_no": "HKP RN 報案號碼/案號 (如 RN:26002134)",
-                    "ta_date": "意外日期 (如 YYYY-MM-DD)",
-                    "ta_time": "意外時間 (如 12:00)",
-                    "location": "意外地點 (如 九龍收費廣場)",
-                    "tunnel_staff_arrived": "隧道職員到達時間 (如 12:02)",
-                    "tunnel_staff_departed": "隧道職員離開時間 (如 13:15)",
+                    "ta_date": "意外日期",
+                    "ta_time": "意外時間",
+                    "location": "意外地點",
+                    "tunnel_staff_arrived": "隧道職員到達時間",
+                    "tunnel_staff_departed": "隧道職員離開時間",
                     "police_arrived_time": "警察到達時間",
                     "police_no": "普通警員編號 (如 SPC 99088, PC 81818)",
                     "ai_staff_no": "交通意外調查組人員編號",
@@ -319,8 +334,8 @@ if st.button(button_label):
                             "driver_name_zh": "司機中文姓名",
                             "age": "年齡",
                             "phone": "電話號碼",
-                            "hkid": "身份證號碼",
-                            "driving_license_no": "駕駛執照號碼",
+                            "hkid": "身份證號碼 (尾數需帶括號，如 G111759(8))",
+                            "driving_license_no": "駕駛執照號碼 (尾數需帶括號，如 G111759(8))",
                             "dl_class": "駕照 Full Class (如 1, 2, 18)",
                             "address_zh": "完整中文住址",
                             "address_en": "完整英文住址",
@@ -433,11 +448,16 @@ if st.button(button_label):
                         ws_data[m["addr_zh"]] = v.get('address_zh', '')
                         ws_data[m["addr_en"]] = v.get('address_en', '')
                         ws_data[m["phone"]] = v.get('phone', '')
-                        if v.get('hkid'): ws_data[m["hkid"]] = v.get('hkid')
-                        ws_data[m["lic_no"]] = v.get('driving_license_no', '')
+                        
+                        # 身份證號碼與駕照號碼：通過 format_hkid_parentheses 強制尾數帶括號
+                        hkid_val = format_hkid_parentheses(v.get('hkid', ''))
+                        lic_val = format_hkid_parentheses(v.get('driving_license_no', ''))
+                        
+                        if hkid_val: ws_data[m["hkid"]] = hkid_val
+                        if lic_val: ws_data[m["lic_no"]] = lic_val
                         if v.get('dl_class'): ws_data[m["dl_class"]] = v.get('dl_class')
 
-                    # 4. 傷者資料 100% 精準對齊 (B74 及 B77:E97 區塊)
+                    # 4. 傷者資料 100% 精準對齊 (含電話號碼與雙向翻譯地址)
                     if data.get('injured_total'): ws_data['B74'] = data.get('injured_total')
                     
                     injured_list = data.get('injured_list', [])
@@ -456,7 +476,7 @@ if st.button(button_label):
                         if inj.get('age'): ws_data[im["age"]] = inj.get('age')
                         ws_data[im["azh"]] = inj.get('address_zh', '')
                         ws_data[im["aen"]] = inj.get('address_en', '')
-                        ws_data[im["ph"]] = inj.get('phone', '')
+                        ws_data[im["ph"]] = inj.get('phone', '')                # 傷者電話號碼精準填入 B82/E82/B94/E94
                         ws_data[im["vno"]] = inj.get('vehicle_no', '')
                         ws_data[im["hosp"]] = inj.get('hospital', '')
                         ws_data[im["esc"]] = inj.get('escort', '')
@@ -465,7 +485,7 @@ if st.button(button_label):
                         ws_police.cell(row=5, column=1, value=f"現場紀錄及司機口供：\n{statement}")
                     
                     wb.save(output_path)
-                    st.success(f"🎉 TAPI 白皮書生成成功！(已精準修復警察編號、隧道時間及傷者欄位！)")
+                    st.success(f"🎉 TAPI 白皮書生成成功！(中英地址翻譯、證件號碼括號格式及傷者電話已完美填補！)")
                     
                     with open(output_path, "rb") as file:
                         st.download_button(
