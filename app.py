@@ -10,10 +10,13 @@ from PIL import Image
 st.set_page_config(page_title="白皮書自動生成系統", page_icon="📝", layout="wide")
 st.title("🚓 交通意外白皮書自動生成系統 (支援手填表格相片)")
 
+# 優先從 Secrets 讀取 API Key
+default_api_key = st.secrets.get("GEMINI_API_KEY", "")
+
 # 左側欄設定 API Key
 with st.sidebar:
     st.header("⚙️ 系統設定")
-    api_key = st.text_input("輸入 Gemini API Key", type="password")
+    api_key = st.text_input("Gemini API Key", value=default_api_key, type="password", help="系統已自動讀取雲端預設 Key，亦可手動覆蓋")
     st.markdown("[按此免費獲取 Google Gemini API Key](https://aistudio.google.com/)")
 
 # 準備介面元件
@@ -26,7 +29,7 @@ statement = st.text_area("請輸入額外口供或補充資料 (若相片已包�
 # 生成按鈕
 if st.button("🚀 立即生成 Excel 白皮書"):
     if not api_key:
-        st.error("請先在左側輸入 Gemini API Key！")
+        st.error("請先輸入或設定 Gemini API Key！")
     elif not uploaded_files and not statement:
         st.error("請上載最少一張相片或輸入文字資料！")
     else:
@@ -104,7 +107,7 @@ if st.button("🚀 立即生成 Excel 白皮書"):
                 contents = images + [prompt]
                 
                 response = client.models.generate_content(
-                    model='gemini-3.8-flash',
+                    model='gemini-2.0-flash',
                     contents=contents,
                     config=types.GenerateContentConfig(
                         response_mime_type="application/json"
