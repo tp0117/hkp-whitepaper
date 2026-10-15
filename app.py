@@ -6,18 +6,49 @@ import json
 import os
 from PIL import Image
 
-# 網頁標題及設定
+# 網頁標題及頁面設定
 st.set_page_config(page_title="白皮書自動生成系統", page_icon="📝", layout="wide")
+
+# 🔒 密碼鎖設定：優先從 Secrets 讀取 APP_PASSWORD，若未設定則預設為 "8888"
+APP_PASSWORD = st.secrets.get("APP_PASSWORD", "8888")
+
+# 初始化登入狀態
+if "authenticated" not in st.session_state:
+    st.session_state["authenticated"] = False
+
+# 若未通過驗證，顯示密碼輸入畫面
+if not st.session_state["authenticated"]:
+    st.title("🔒 白皮書系統 - 安全驗證")
+    st.info("本系統僅供內部授權人員使用，請輸入訪問密碼。")
+    
+    input_pwd = st.text_input("請輸入訪問密碼：", type="password")
+    if st.button("🔑 登入"):
+        if input_pwd == APP_PASSWORD:
+            st.session_state["authenticated"] = True
+            st.success("驗證成功！正在載入系統...")
+            st.rerun()
+        else:
+            st.error("密碼錯誤，請重新輸入！")
+    
+    st.stop()  # 密碼未通過前，停止執行後續所有系統邏輯
+
+# ----------------- 以下為驗證通過後的系統主介面 -----------------
+
 st.title("🚓 交通意外白皮書自動生成系統 (支援手填表格相片)")
 
-# 優先從 Secrets 讀取 API Key
+# 優先從 Secrets 讀取 Gemini API Key
 default_api_key = st.secrets.get("GEMINI_API_KEY", "")
 
-# 左側欄設定 API Key
+# 左側欄設定
 with st.sidebar:
     st.header("⚙️ 系統設定")
     api_key = st.text_input("Gemini API Key", value=default_api_key, type="password", help="系統已自動讀取雲端預設 Key，亦可手動覆蓋")
     st.markdown("[按此免費獲取 Google Gemini API Key](https://aistudio.google.com/)")
+    
+    st.divider()
+    if st.button("🔒 登出系統"):
+        st.session_state["authenticated"] = False
+        st.rerun()
 
 # 準備介面元件
 st.subheader("1. 上載相片 (含行車證、駕照、手填紀錄表或現場照片)")
@@ -33,20 +64,29 @@ if st.button("🚀 立即生成 Excel 白皮書"):
     elif not uploaded_files and not statement:
         st.error("請上載最少一張相片或輸入文字資料！")
     else:
-        with st.spinner('AI 正在全方位辨識相片（包含手填表格手寫字）、提取時間地點並翻譯地址中...'):
+        with st.spinner('AI 正在全方位辨識相片（含行車證詳細規格、駕照 Full Class 類別及手寫字）...'):
             try:
                 client = genai.Client(api_key=api_key.strip())
                 images = [Image.open(file) for file in uploaded_files] if uploaded_files else []
                 
                 prompt = f"""
                 你是一個專業的香港交通意外白皮書資料提取助手。
-                請仔細分析所有上載的相片（包含行車證、駕駛執照、手填紙本表格/紀錄單、現場照片）以及現場文字內容：
+                請仔細分析所有上載的相片（特別是行車證、駕駛執照、手填紙本表格/紀錄單、現場照片）以及現場文字內容：
                 
                 【補充文字內容】：
                 {statement}
                 
-                【特別說明】：
-                相片中可能包含「手填/手寫的官方或公司紀錄表」，請精準讀取上面的手寫字體與數字，提取以下所有欄位資訊。
+                【行車證 (Vehicle Licence) 特別提取要求】：
+                1. plate_no：車牌號碼。
+                2. transaction_no：行車證上的交易編號 / Transaction No.。
+                3. vehicle_class：行車證上的 Class / 車輛類別 (如 PRIVATE CAR, LIGHT GOODS VEHICLE, TAXI 等)。
+                4. make：車輛廠名 (如 TOYOTA, MERCEDES-BENZ)。
+                5. color：車輛顏色。
+                6. seating_capacity：行車證上的座位 / 載客額 (Seating Capacity)。
+                
+                【駕駛執照 (Driving Licence) 特別提取要求】：
+                1. driving_license_no：駕駛執照號碼 (請移除括號)。
+                2. dl_class：駕駛執照上「正式執照 Full class」欄位內的數字類別 (如 1, 2 或 1, 2, 18 等)。
                 
                 【警察及時間資料要求】：
                 1. police_no（普通警員編號）：只提取軍裝/普通警員編號 (如 SPC 48840, PC 26909)。【絕對不可包含 AM 開頭警車車牌】。
@@ -74,8 +114,11 @@ if st.button("🚀 立即生成 Excel 白皮書"):
                     "vehicles": [
                         {{
                             "plate_no": "車牌號碼",
+                            "transaction_no": "行車證交易編號 Transaction No.",
+                            "vehicle_class": "行車證車輛類別 Class (如 PRIVATE CAR)",
                             "make": "車輛廠名 (如 TOYOTA)",
                             "color": "車輛顏色",
+                            "seating_capacity": "車輛載客額 Seating Capacity",
                             "damage": "該車損毀性質及程度",
                             "driver_name_en": "司機英文姓名",
                             "driver_name_zh": "司機中文姓名",
@@ -83,6 +126,7 @@ if st.button("🚀 立即生成 Excel 白皮書"):
                             "phone": "電話號碼",
                             "hkid": "身份證號碼",
                             "driving_license_no": "駕駛執照號碼 (請移除括號)",
+                            "dl_class": "駕駛執照 Full Class 數字類別 (如 1, 2, 18)",
                             "address_zh": "完整中文住址 (繁體中文)",
                             "address_en": "完整英文住址"
                         }}
@@ -144,21 +188,25 @@ if st.button("🚀 立即生成 Excel 白皮書"):
                 if data.get('ai_arrived_time'): ws_data['E5'] = data.get('ai_arrived_time')
                 if data.get('ai_departed_time'): ws_data['E6'] = data.get('ai_departed_time')
                 
-                # 2. 車輛 1 ~ 4 儲存格映射表
+                # 2. 車輛 1 ~ 4 儲存格映射表 (包含新增的交易編號、車輛類別、載客額及駕照類別)
                 v_mappings = [
-                    {"plate": "B12", "make": "B14", "color": "B15", "damage": "B20", "name_en": "E12", "name_zh": "E13", "age": "E14", "addr_zh": "E15", "addr_en": "E16", "phone": "E17", "hkid": "E18", "lic_no": "E19"},
-                    {"plate": "B27", "make": "B29", "color": "B30", "damage": "B35", "name_en": "E27", "name_zh": "E28", "age": "E29", "addr_zh": "E30", "addr_en": "E31", "phone": "E32", "hkid": "E33", "lic_no": "E34"},
-                    {"plate": "B43", "make": "B45", "color": "B46", "damage": "B51", "name_en": "E43", "name_zh": "E44", "age": "E45", "addr_zh": "E46", "addr_en": "E47", "phone": "E48", "hkid": "E49", "lic_no": "E50"},
-                    {"plate": "B58", "make": "B60", "color": "B61", "damage": "B66", "name_en": "E58", "name_zh": "E59", "age": "E60", "addr_zh": "E61", "addr_en": "E62", "phone": "E63", "hkid": "E64", "lic_no": "E65"}
+                    {"plate": "B12", "trans_no": "B13", "veh_class": "B14", "make": "B15", "color": "B16", "seating": "B17", "damage": "B20", "name_en": "E12", "name_zh": "E13", "age": "E14", "addr_zh": "E15", "addr_en": "E16", "phone": "E17", "hkid": "E18", "lic_no": "E19", "dl_class": "E20"},
+                    {"plate": "B27", "trans_no": "B28", "veh_class": "B29", "make": "B30", "color": "B31", "seating": "B32", "damage": "B35", "name_en": "E27", "name_zh": "E28", "age": "E29", "addr_zh": "E30", "addr_en": "E31", "phone": "E32", "hkid": "E33", "lic_no": "E34", "dl_class": "E35"},
+                    {"plate": "B43", "trans_no": "B44", "veh_class": "B45", "make": "B46", "color": "B47", "seating": "B48", "damage": "B51", "name_en": "E43", "name_zh": "E44", "age": "E45", "addr_zh": "E46", "addr_en": "E47", "phone": "E48", "hkid": "E49", "lic_no": "E50", "dl_class": "E51"},
+                    {"plate": "B58", "trans_no": "B59", "veh_class": "B60", "make": "B61", "color": "B62", "seating": "B63", "damage": "B66", "name_en": "E58", "name_zh": "E59", "age": "E60", "addr_zh": "E61", "addr_en": "E62", "phone": "E63", "hkid": "E64", "lic_no": "E65", "dl_class": "E66"}
                 ]
                 
                 for idx, v in enumerate(vehicles_list):
                     if idx >= len(v_mappings): break
                     m = v_mappings[idx]
                     ws_data[m["plate"]] = v.get('plate_no', '')
+                    if v.get('transaction_no'): ws_data[m["trans_no"]] = v.get('transaction_no')
+                    if v.get('vehicle_class'): ws_data[m["veh_class"]] = v.get('vehicle_class')
                     ws_data[m["make"]] = v.get('make', '')
                     ws_data[m["color"]] = v.get('color', '')
+                    if v.get('seating_capacity'): ws_data[m["seating"]] = v.get('seating_capacity')
                     ws_data[m["damage"]] = v.get('damage', '')
+                    
                     ws_data[m["name_en"]] = v.get('driver_name_en', '')
                     ws_data[m["name_zh"]] = v.get('driver_name_zh', '')
                     if v.get('age'): ws_data[m["age"]] = v.get('age')
@@ -167,6 +215,7 @@ if st.button("🚀 立即生成 Excel 白皮書"):
                     ws_data[m["phone"]] = v.get('phone', '')
                     if v.get('hkid'): ws_data[m["hkid"]] = v.get('hkid')
                     ws_data[m["lic_no"]] = v.get('driving_license_no', '')
+                    if v.get('dl_class'): ws_data[m["dl_class"]] = v.get('dl_class')
 
                 # 3. 傷者資料填寫 (傷者 1~4)
                 if data.get('injured_total'): ws_data['B74'] = data.get('injured_total')
@@ -176,7 +225,7 @@ if st.button("🚀 立即生成 Excel 白皮書"):
                     {"en": "B77", "zh": "B78", "age": "B79", "azh": "B80", "aen": "B81", "ph": "B82", "vno": "B83", "hosp": "B84", "esc": "B85"},
                     {"en": "E77", "zh": "E78", "age": "E79", "azh": "E80", "aen": "E81", "ph": "E82", "vno": "E83", "hosp": "E84", "esc": "E85"},
                     {"en": "B89", "zh": "B90", "age": "B91", "azh": "B92", "aen": "B93", "ph": "B94", "vno": "B95", "hosp": "B96", "esc": "B97"},
-                    {"en": "E89", "zh": "E90", "age": "E91", "azh": "E92", "aen": "E93", "ph": "E94", "vno": "E95", "hosp": "E96", "esc": "E97"}
+                    {"en": "E89", "zh": "E90", "age": "E91", "azh": "E80", "aen": "E93", "ph": "E94", "vno": "E95", "hosp": "E96", "esc": "E97"}
                 ]
                 
                 for idx, inj in enumerate(injured_list):
@@ -198,7 +247,7 @@ if st.button("🚀 立即生成 Excel 白皮書"):
                 
                 wb.save(output_path)
                 
-                st.success("🎉 白皮書生成成功！手填表格相片上的時間與案件資料已自動精準填入！")
+                st.success("🎉 白皮書生成成功！已精準提取行車證詳細規格及駕駛執照類別！")
                 
                 # 下載按鈕
                 with open(output_path, "rb") as file:
