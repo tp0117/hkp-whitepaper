@@ -258,7 +258,7 @@ if st.button(button_label):
     elif not images_with_tags and not statement:
         st.error("請最少上載一張相片或輸入文字資料！")
     else:
-        with st.spinner('AI 正在處理中英地址雙向翻譯與精準對齊...'):
+        with st.spinner('AI 正在全方位辨識（含駕駛執照期滿日期、地址翻譯及精準對齊）...'):
             try:
                 client = genai.Client(api_key=api_key.strip())
                 raw_images = [item[0] for item in images_with_tags]
@@ -280,9 +280,10 @@ if st.button(button_label):
                    - address_en：完整英文住址 (若原本是中文，必須精準翻譯成英文)。
                 2. 絕對不可留空或填寫 N/A！兩者必須同時填滿。
                 
-                【🆔 證件號碼格式要求】：
+                【🆔 證件號碼與期滿日期要求】：
                 1. 身份證號碼 (hkid)：最後一個校驗碼數字或字母必須使用圓括號 ( ) 括住，例如 G111759(8) 或 Y463269(7)。
                 2. 駕駛執照號碼 (driving_license_no)：請照實提取，尾數【絕對不要添加括號】(例如 Y463269 7)。
+                3. dl_expiry_date (駕駛執照期滿日期)：駕駛執照上的有效期/屆滿日期 (如 DD/MM/YYYY 或 DD-MM-YYYY)。
                 
                 【嚴格警察與時間資料拆解要求】：
                 1. police_no（普通警員編號）：只提取軍裝/普通警員編號 (如 SPC 99088, PC 81818)。【絕對不可填入 AI 警員編號，更不可包含 AM 車牌】。
@@ -328,7 +329,7 @@ if st.button(button_label):
                             "make": "車輛廠名 (如 TOYOTA)",
                             "color": "車輛顏色 (如 SILVER-VAR)",
                             "transaction_no": "存檔編號 C06-0123",
-                            "expiry_date": "屆滿日期 (無則 ———)",
+                            "expiry_date": "行車證期滿日期 (無則 ———)",
                             "seating_capacity": "載客額 (如 5)",
                             "damage": "車輛損毀情況",
                             "driver_name_en": "司機英文姓名",
@@ -338,6 +339,7 @@ if st.button(button_label):
                             "hkid": "身份證號碼 (尾數帶括號，如 G111759(8))",
                             "driving_license_no": "駕駛執照號碼 (無括號，如 Y463269 7)",
                             "dl_class": "駕照 Full Class (如 1, 2, 18)",
+                            "dl_expiry_date": "駕駛執照期滿日期 (如 DD/MM/YYYY)",
                             "address_zh": "完整中文住址",
                             "address_en": "完整英文住址",
                             "driver_statement": "司機口供"
@@ -423,12 +425,12 @@ if st.button(button_label):
                     if data.get('ai_arrived_time'): ws_data['E5'] = data.get('ai_arrived_time')
                     if data.get('ai_departed_time'): ws_data['E6'] = data.get('ai_departed_time')
                     
-                    # 3. 車輛 1 ~ 4 儲存格精準映射
+                    # 3. 車輛 1 ~ 4 儲存格精準映射 (含駕照期滿日期 dl_exp ➔ E21 / E36 / E51 / E66)
                     v_mappings = [
-                        {"plate": "B12", "veh_class": "B13", "make": "B14", "color": "B15", "trans_no": "B16", "expiry": "B17", "seating": "B18", "damage": "B20", "name_en": "E12", "name_zh": "E13", "age": "E14", "addr_zh": "E15", "addr_en": "E16", "phone": "E17", "hkid": "E18", "lic_no": "E19", "dl_class": "E20"},
-                        {"plate": "B27", "veh_class": "B28", "make": "B29", "color": "B30", "trans_no": "B31", "expiry": "B32", "seating": "B33", "damage": "B35", "name_en": "E27", "name_zh": "E28", "age": "E29", "addr_zh": "E30", "addr_en": "E31", "phone": "E32", "hkid": "E33", "lic_no": "E34", "dl_class": "E35"},
-                        {"plate": "B43", "veh_class": "B44", "make": "B45", "color": "B46", "trans_no": "B47", "expiry": "B48", "seating": "B49", "damage": "B51", "name_en": "E43", "name_zh": "E44", "age": "E45", "addr_zh": "E46", "addr_en": "E47", "phone": "E48", "hkid": "E49", "lic_no": "E50", "dl_class": "E51"},
-                        {"plate": "B58", "veh_class": "B59", "make": "B60", "color": "B61", "trans_no": "B62", "expiry": "B63", "seating": "B64", "damage": "B66", "name_en": "E58", "name_zh": "E59", "age": "E60", "addr_zh": "E61", "addr_en": "E62", "phone": "E63", "hkid": "E64", "lic_no": "E65", "dl_class": "E66"}
+                        {"plate": "B12", "veh_class": "B13", "make": "B14", "color": "B15", "trans_no": "B16", "expiry": "B17", "seating": "B18", "damage": "B20", "name_en": "E12", "name_zh": "E13", "age": "E14", "addr_zh": "E15", "addr_en": "E16", "phone": "E17", "hkid": "E18", "lic_no": "E19", "dl_class": "E20", "dl_exp": "E21"},
+                        {"plate": "B27", "veh_class": "B28", "make": "B29", "color": "B30", "trans_no": "B31", "expiry": "B32", "seating": "B33", "damage": "B35", "name_en": "E27", "name_zh": "E28", "age": "E29", "addr_zh": "E30", "addr_en": "E31", "phone": "E32", "hkid": "E33", "lic_no": "E34", "dl_class": "E35", "dl_exp": "E36"},
+                        {"plate": "B43", "veh_class": "B44", "make": "B45", "color": "B46", "trans_no": "B47", "expiry": "B48", "seating": "B49", "damage": "B51", "name_en": "E43", "name_zh": "E44", "age": "E45", "addr_zh": "E46", "addr_en": "E47", "phone": "E48", "hkid": "E49", "lic_no": "E50", "dl_class": "E51", "dl_exp": "E51"},
+                        {"plate": "B58", "veh_class": "B59", "make": "B60", "color": "B61", "trans_no": "B62", "expiry": "B63", "seating": "B64", "damage": "B66", "name_en": "E58", "name_zh": "E59", "age": "E60", "addr_zh": "E61", "addr_en": "E62", "phone": "E63", "hkid": "E64", "lic_no": "E65", "dl_class": "E66", "dl_exp": "E66"}
                     ]
                     
                     for idx, v in enumerate(vehicles_list):
@@ -457,6 +459,7 @@ if st.button(button_label):
                         if hkid_val: ws_data[m["hkid"]] = hkid_val
                         if lic_val: ws_data[m["lic_no"]] = lic_val
                         if v.get('dl_class'): ws_data[m["dl_class"]] = v.get('dl_class')
+                        if v.get('dl_expiry_date'): ws_data[m["dl_exp"]] = v.get('dl_expiry_date') # 駕駛執照期滿日期 填入 E21/E36/E51/E66
 
                     # 4. 傷者資料 100% 精準對齊 (含電話號碼與雙向翻譯地址)
                     if data.get('injured_total'): ws_data['B74'] = data.get('injured_total')
@@ -486,7 +489,7 @@ if st.button(button_label):
                         ws_police.cell(row=5, column=1, value=f"現場紀錄及司機口供：\n{statement}")
                     
                     wb.save(output_path)
-                    st.success(f"🎉 TAPI 白皮書生成成功！(身份證帶括號、駕照號碼不帶括號，已完美修正！)")
+                    st.success(f"🎉 TAPI 白皮書生成成功！(已完美補上駕駛執照期滿日期 E21/E36！)")
                     
                     with open(output_path, "rb") as file:
                         st.download_button(
