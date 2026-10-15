@@ -16,7 +16,7 @@ try:
 except ImportError:
     docx = None
 
-# Helper 函數：自動確保身份證 / 駕照號碼尾數加上圓括號，如 G111759(8) 或 Y463269(7)
+# Helper 函數：僅用於身份證號碼尾數加上圓括號，如 G111759(8)
 def format_hkid_parentheses(code_str):
     if not code_str:
         return ""
@@ -187,8 +187,8 @@ def generate_tado_word(data, statement_text):
         p.add_run(f"8）駕駛人： ").bold = True
         p.add_run(f"{driver_str}\n")
         
-        # 9) 駕駛執照號碼 (格式化括號)
-        lic_no = format_hkid_parentheses(v.get('driving_license_no', '———'))
+        # 9) 駕駛執照號碼 (保持原樣，不加尾數括號)
+        lic_no = v.get('driving_license_no', '———')
         p.add_run(f"9）駕駛執照號碼： ").bold = True
         p.add_run(f"{lic_no}\n")
         
@@ -258,7 +258,7 @@ if st.button(button_label):
     elif not images_with_tags and not statement:
         st.error("請最少上載一張相片或輸入文字資料！")
     else:
-        with st.spinner('AI 正在進行中英地址雙向翻譯、身份證號碼尾數括號修飾與全方位對齊...'):
+        with st.spinner('AI 正在處理中英地址雙向翻譯與精準對齊...'):
             try:
                 client = genai.Client(api_key=api_key.strip())
                 raw_images = [item[0] for item in images_with_tags]
@@ -280,8 +280,9 @@ if st.button(button_label):
                    - address_en：完整英文住址 (若原本是中文，必須精準翻譯成英文)。
                 2. 絕對不可留空或填寫 N/A！兩者必須同時填滿。
                 
-                【🆔 身份證與駕駛執照尾數括號強制要求】：
-                1. 身份證號碼 (hkid) 與 駕駛執照號碼 (driving_license_no)：最後一個校驗碼數字或字母必須使用圓括號 ( ) 括住，例如 G111759(8) 或 Y463269(7)。
+                【🆔 證件號碼格式要求】：
+                1. 身份證號碼 (hkid)：最後一個校驗碼數字或字母必須使用圓括號 ( ) 括住，例如 G111759(8) 或 Y463269(7)。
+                2. 駕駛執照號碼 (driving_license_no)：請照實提取，尾數【絕對不要添加括號】(例如 Y463269 7)。
                 
                 【嚴格警察與時間資料拆解要求】：
                 1. police_no（普通警員編號）：只提取軍裝/普通警員編號 (如 SPC 99088, PC 81818)。【絕對不可填入 AI 警員編號，更不可包含 AM 車牌】。
@@ -334,8 +335,8 @@ if st.button(button_label):
                             "driver_name_zh": "司機中文姓名",
                             "age": "年齡",
                             "phone": "電話號碼",
-                            "hkid": "身份證號碼 (尾數需帶括號，如 G111759(8))",
-                            "driving_license_no": "駕駛執照號碼 (尾數需帶括號，如 G111759(8))",
+                            "hkid": "身份證號碼 (尾數帶括號，如 G111759(8))",
+                            "driving_license_no": "駕駛執照號碼 (無括號，如 Y463269 7)",
                             "dl_class": "駕照 Full Class (如 1, 2, 18)",
                             "address_zh": "完整中文住址",
                             "address_en": "完整英文住址",
@@ -449,9 +450,9 @@ if st.button(button_label):
                         ws_data[m["addr_en"]] = v.get('address_en', '')
                         ws_data[m["phone"]] = v.get('phone', '')
                         
-                        # 身份證號碼與駕照號碼：通過 format_hkid_parentheses 強制尾數帶括號
+                        # 身份證號碼：帶尾數括號；駕駛執照號碼：保持原樣不帶括號
                         hkid_val = format_hkid_parentheses(v.get('hkid', ''))
-                        lic_val = format_hkid_parentheses(v.get('driving_license_no', ''))
+                        lic_val = v.get('driving_license_no', '')
                         
                         if hkid_val: ws_data[m["hkid"]] = hkid_val
                         if lic_val: ws_data[m["lic_no"]] = lic_val
@@ -476,7 +477,7 @@ if st.button(button_label):
                         if inj.get('age'): ws_data[im["age"]] = inj.get('age')
                         ws_data[im["azh"]] = inj.get('address_zh', '')
                         ws_data[im["aen"]] = inj.get('address_en', '')
-                        ws_data[im["ph"]] = inj.get('phone', '')                # 傷者電話號碼精準填入 B82/E82/B94/E94
+                        ws_data[im["ph"]] = inj.get('phone', '')                # 傷者電話號碼
                         ws_data[im["vno"]] = inj.get('vehicle_no', '')
                         ws_data[im["hosp"]] = inj.get('hospital', '')
                         ws_data[im["esc"]] = inj.get('escort', '')
@@ -485,7 +486,7 @@ if st.button(button_label):
                         ws_police.cell(row=5, column=1, value=f"現場紀錄及司機口供：\n{statement}")
                     
                     wb.save(output_path)
-                    st.success(f"🎉 TAPI 白皮書生成成功！(中英地址翻譯、證件號碼括號格式及傷者電話已完美填補！)")
+                    st.success(f"🎉 TAPI 白皮書生成成功！(身份證帶括號、駕照號碼不帶括號，已完美修正！)")
                     
                     with open(output_path, "rb") as file:
                         st.download_button(
