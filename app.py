@@ -145,7 +145,7 @@ def generate_tado_word(data, statement_text):
             p = doc.add_paragraph()
             p.paragraph_format.line_spacing = 1.2
             
-            # 1) 車牌 (含尾數)
+            # 1) 車牌 (必須包含尾數)
             plate = v.get('plate_no', '———')
             p.add_run(f"1）車牌： ").bold = True
             p.add_run(f"{plate}\n")
@@ -210,10 +210,19 @@ def generate_tado_word(data, statement_text):
             p.add_run(f"12）車輛損毀情況： ").bold = True
             p.add_run(f"{damage}\n")
             
-            # 13) 司機口供
+            # 13) 司機口供 (自動以「」括號括住)
             d_statement = v.get('driver_statement', statement_text if statement_text else '———')
+            if d_statement and d_statement != '———':
+                s_clean = d_statement.strip()
+                if not (s_clean.startswith('「') and s_clean.endswith('」')):
+                    d_statement_formatted = f"「{s_clean}」"
+                else:
+                    d_statement_formatted = s_clean
+            else:
+                d_statement_formatted = '———'
+                
             p.add_run(f"13）司機口供： ").bold = True
-            p.add_run(f"{d_statement}\n")
+            p.add_run(f"{d_statement_formatted}\n")
 
         # 結尾：警方資料及酒精呼氣測試
         doc.add_heading("警方資料及測試紀錄：", level=2)
@@ -263,7 +272,7 @@ if st.button(button_label):
     elif not images_with_tags and not statement:
         st.error("請最少上載一張相片或輸入文字資料！")
     else:
-        with st.spinner('AI 正在全方位辨識（含駕駛執照期滿日期、地址翻譯及精準對齊）...'):
+        with st.spinner('AI 正在全方位辨識（包含車牌尾數與口供格式化）...'):
             try:
                 client = genai.Client(api_key=api_key.strip())
                 raw_images = [item[0] for item in images_with_tags]
@@ -278,6 +287,9 @@ if st.button(button_label):
                 
                 【補充文字內容與口供】：
                 {statement}
+                
+                【🚘 車牌號碼強制要求】：
+                - plate_no：必須完整提取並包含車牌的尾數字母/數字 (例如 UG8125 R, WA1062 Q, AB1234 A)。絕對不可以省略尾數！
                 
                 【🌐 地址雙向翻譯強制要求 (100% 必須完成)】：
                 1. 司機及傷者的住址：相片中不論提供的是中文住址還是英文住址，你必須同時生成：
@@ -327,7 +339,7 @@ if st.button(button_label):
                     "breathalyzer_test": "酒精呼氣測試紀錄",
                     "vehicles": [
                         {{
-                            "plate_no": "車牌號碼 (如 UG8125 R 或 AB1234 A)",
+                            "plate_no": "車牌號碼 (必須含尾數，如 UG8125 R 或 WA1062 Q)",
                             "vehicle_class_en": "英文車輛類別 (如 LIGHT GOODS VEHICLE)",
                             "vehicle_class_zh": "中文車輛類別 (如 輕型貨車)",
                             "gross_weight": "總重量",
