@@ -243,68 +243,102 @@ if st.button(button_label):
     elif not images_with_tags and not statement:
         st.error("請最少上載一張相片或輸入文字資料！")
     else:
-        with st.spinner('AI 正在全方位辨識（自動對齊車輛甲乙丙、規格與酒精測試紀錄）...'):
+        with st.spinner('AI 正在全方位辨識（自動精準對齊警察編號、隧道時間、傷者資料）...'):
             try:
                 client = genai.Client(api_key=api_key.strip())
                 raw_images = [item[0] for item in images_with_tags]
-                photo_notes = "\n".join([f"- 相片 {idx+1} 來自分類上載區：【{item[1]}】" for idx, item in enumerate(images_with_tags)])
+                photo_notes = "\n".join([f"- 相片 {idx+1} 來自：【{item[1]}】" for idx, item in enumerate(images_with_tags)])
                 
                 prompt = f"""
                 你是一個專業的香港交通意外資料提取助手。
-                請仔細分析所有上載的相片（包含行車證、駕駛執照、手填紙本表格/紀錄單、現場照片）以及現場文字內容：
+                請仔細分析所有上載的相片（特別是手填紙本紀錄、行車證、駕駛執照、現場照片）以及現場文字內容：
                 
-                【上載相片分類備註】：
+                【相片來源分類】：
                 {photo_notes}
                 
-                【核心交叉配對邏輯】：
-                1. 請優先參考相片所在的分區標籤（如車輛甲、車輛乙）。
-                2. 請精準對齊「車輛與司機」資料，車牌記得保留尾數字母 (例如 AB1234 A)。
-                
-                【補充文字內容與酒精測試】：
+                【補充文字內容與口供】：
                 {statement}
                 
-                【TADO 規格特別提取要求】：
-                1. vehicle_class_en: 英文車輛類別 (如 PRIVATE CAR, LIGHT GOODS VEHICLE)。
-                2. vehicle_class_zh: 對應中文車輛類別 (如 私家車, 輕型貨車)。
-                3. gross_weight: 車輛總重量。若為私家車或電單車，請填寫 "———"；若為貨車，請填寫重量數字加單位 (如 "5.5T")。
-                4. expiry_date: 行車證牌照期滿日期。若相片無顯示或未過期/無顯示，請填寫 "———"。
-                5. breathalyzer_test: 警員是否有替涉及車輛司機進行酒精呼氣測試 (PBT) 的紀錄或結果。若有提及請詳細填寫，若無請填寫 "未有提供 / 無紀錄"。
-                6. police_veh_no: 警車車牌 (例如 AM 8810)。
-                7. police_no: 警員編號 (例如 警員26088)。
+                【嚴格警察與時間資料拆解要求】：
+                1. police_no（普通警員編號）：只提取軍裝/普通警員編號 (如 SPC 99088, PC 81818)。【絕對不可填入 AI 警員編號，更不可包含 AM 車牌】。
+                2. ai_staff_no（AI 人員編號）：交通意外調查組人員編號 (如 12345)。【必須與普通警員編號完全分開】。
+                3. tunnel_staff_arrived: 隧道職員到達時間。
+                4. tunnel_staff_departed: 隧道職員離開時間 / All Departed 時間。
+                5. police_arrived_time: 警察到達時間。
+                6. ai_arrived_time: HKP AI 到達時間。
+                7. ai_departed_time: HKP AI 離開時間。
                 
-                【地址翻譯要求】：
-                - 英文地址必須翻譯成香港繁體中文地址填入 address_zh。
-                - 中文地址必須翻譯成英文地址填入 address_en。
+                【車輛與司機細節】：
+                1. seating_capacity: 車輛載客額數字 (如 5 或 4)。
+                2. dl_class: 駕駛執照「正式執照 Full class」欄位內的數字類別 (如 1, 2 或 1, 2, 18)。
+                3. gross_weight: 總重量 (私家車/電單車填 "———"，貨車填如 "5.5T")。
+                
+                【受傷者 (Injured) 詳細資料提取要求】：
+                請仔細讀取相片中關於「受傷者/傷者」的任何文字紀錄，提取以下內容：
+                1. injured_total: 受傷者合共人數 (無人受傷填 "0")。
+                2. injured_list: 傷者列表陣列 (最多 4 人)，包含：
+                   - name_en: 傷者英文姓名
+                   - name_zh: 傷者中文姓名
+                   - age: 年齡
+                   - address_zh: 中文住址
+                   - address_en: 英文住址
+                   - phone: 電話號碼
+                   - vehicle_no: 涉及車牌號碼 (Vehicle Number)
+                   - hospital: 送往醫院
+                   - escort: 護送人/遞送人
                 
                 請嚴格以 JSON 格式輸出：
                 {{
                     "log_no": "Log No 紀錄號碼 (無則留空)",
-                    "rn_no": "HKP RN 報案號碼/案號 (如 RN:26031028)",
-                    "ta_date": "意外日期",
-                    "ta_time": "意外時間",
-                    "location": "意外地點",
+                    "rn_no": "HKP RN 報案號碼/案號 (如 RN:26002134)",
+                    "ta_date": "意外日期 (如 YYYY-MM-DD)",
+                    "ta_time": "意外時間 (如 12:00)",
+                    "location": "意外地點 (如 九龍收費廣場)",
+                    "tunnel_staff_arrived": "隧道職員到達時間 (如 12:02)",
+                    "tunnel_staff_departed": "隧道職員離開時間 (如 13:15)",
+                    "police_arrived_time": "警察到達時間",
+                    "police_no": "普通警員編號 (如 SPC 99088, PC 81818)",
+                    "ai_staff_no": "交通意外調查組人員編號",
+                    "ai_arrived_time": "HKP AI 到達時間",
+                    "ai_departed_time": "HKP AI 離開時間",
                     "police_veh_no": "警車車牌 (如 AM 8810)",
-                    "police_no": "到場警員編號 (如 警員26088)",
-                    "breathalyzer_test": "酒精呼氣測試紀錄/結果",
+                    "breathalyzer_test": "酒精呼氣測試紀錄",
                     "vehicles": [
                         {{
-                            "plate_no": "車牌號碼 (包含尾數，如 AB1234 A)",
-                            "vehicle_class_en": "英文車輛類別 (如 PRIVATE CAR)",
-                            "vehicle_class_zh": "中文車輛類別 (如 私家車)",
-                            "gross_weight": "總重量 (私家車填 ———，貨車填 5.5T)",
-                            "make": "車輛廠名 (如 HONDA)",
-                            "color": "車輛顏色 (如 SILVER/VAR)",
-                            "transaction_no": "存檔編號 Transaction Number",
-                            "expiry_date": "屆滿日期 (無則填 ———)",
+                            "plate_no": "車牌號碼 (如 UG8125 R 或 AB1234 A)",
+                            "vehicle_class_en": "英文車輛類別 (如 LIGHT GOODS VEHICLE)",
+                            "vehicle_class_zh": "中文車輛類別 (如 輕型貨車)",
+                            "gross_weight": "總重量",
+                            "make": "車輛廠名 (如 TOYOTA)",
+                            "color": "車輛顏色 (如 SILVER-VAR)",
+                            "transaction_no": "存檔編號 C06-0123",
+                            "expiry_date": "屆滿日期 (無則 ———)",
+                            "seating_capacity": "載客額 (如 5)",
                             "damage": "車輛損毀情況",
                             "driver_name_en": "司機英文姓名",
                             "driver_name_zh": "司機中文姓名",
+                            "age": "年齡",
                             "phone": "電話號碼",
                             "hkid": "身份證號碼",
-                            "driving_license_no": "駕駛執照號碼 (如 Y463269 7)",
+                            "driving_license_no": "駕駛執照號碼",
+                            "dl_class": "駕照 Full Class (如 1, 2, 18)",
                             "address_zh": "完整中文住址",
                             "address_en": "完整英文住址",
-                            "driver_statement": "司機口供摘要"
+                            "driver_statement": "司機口供"
+                        }}
+                    ],
+                    "injured_total": "受傷者合共人數",
+                    "injured_list": [
+                        {{
+                            "name_en": "傷者英文名",
+                            "name_zh": "傷者中文名",
+                            "age": "年齡",
+                            "address_zh": "中文住址",
+                            "address_en": "英文住址",
+                            "phone": "電話號碼",
+                            "vehicle_no": "涉及車牌號碼",
+                            "hospital": "送往醫院",
+                            "escort": "遞送人/護送人"
                         }}
                     ]
                 }}
@@ -342,7 +376,7 @@ if st.button(button_label):
                 
                 data = json.loads(response.text)
                 
-                st.subheader("📊 AI 自動提取結果預覽：")
+                st.subheader("📊 AI 自動提取與精準對齊預覽：")
                 st.json(data)
                 
                 vehicles_list = data.get('vehicles', [])
@@ -357,18 +391,28 @@ if st.button(button_label):
                     ws_data = wb['Data']
                     ws_police = wb['Police']
                     
+                    # 1. 頂部案件與隧道時間
                     if data.get('log_no'): ws_data['B1'] = data.get('log_no')
                     if data.get('rn_no'): ws_data['B2'] = data.get('rn_no')
                     if data.get('ta_date'): ws_data['B3'] = data.get('ta_date')
                     if data.get('ta_time'): ws_data['B4'] = data.get('ta_time')
                     if data.get('location'): ws_data['B5'] = data.get('location')
+                    if data.get('tunnel_staff_arrived'): ws_data['B6'] = data.get('tunnel_staff_arrived')
+                    if data.get('tunnel_staff_departed'): ws_data['B7'] = data.get('tunnel_staff_departed')
                     
-                    if data.get('police_no'): ws_data['E3'] = data.get('police_no')
+                    # 2. 警察資料精準獨立拆解 (E 欄)
+                    if data.get('police_arrived_time'): ws_data['E2'] = data.get('police_arrived_time')
+                    if data.get('police_no'): ws_data['E3'] = data.get('police_no')          # 普通警員
+                    if data.get('ai_staff_no'): ws_data['E4'] = data.get('ai_staff_no')        # AI Staff
+                    if data.get('ai_arrived_time'): ws_data['E5'] = data.get('ai_arrived_time')
+                    if data.get('ai_departed_time'): ws_data['E6'] = data.get('ai_departed_time')
                     
+                    # 3. 車輛 1 ~ 4 儲存格精準映射
                     v_mappings = [
                         {"plate": "B12", "veh_class": "B13", "make": "B14", "color": "B15", "trans_no": "B16", "expiry": "B17", "seating": "B18", "damage": "B20", "name_en": "E12", "name_zh": "E13", "age": "E14", "addr_zh": "E15", "addr_en": "E16", "phone": "E17", "hkid": "E18", "lic_no": "E19", "dl_class": "E20"},
                         {"plate": "B27", "veh_class": "B28", "make": "B29", "color": "B30", "trans_no": "B31", "expiry": "B32", "seating": "B33", "damage": "B35", "name_en": "E27", "name_zh": "E28", "age": "E29", "addr_zh": "E30", "addr_en": "E31", "phone": "E32", "hkid": "E33", "lic_no": "E34", "dl_class": "E35"},
-                        {"plate": "B43", "veh_class": "B44", "make": "B45", "color": "B46", "trans_no": "B47", "expiry": "B48", "seating": "B49", "damage": "B51", "name_en": "E43", "name_zh": "E44", "age": "E45", "addr_zh": "E46", "addr_en": "E47", "phone": "E48", "hkid": "E49", "lic_no": "E50", "dl_class": "E51"}
+                        {"plate": "B43", "veh_class": "B44", "make": "B45", "color": "B46", "trans_no": "B47", "expiry": "B48", "seating": "B49", "damage": "B51", "name_en": "E43", "name_zh": "E44", "age": "E45", "addr_zh": "E46", "addr_en": "E47", "phone": "E48", "hkid": "E49", "lic_no": "E50", "dl_class": "E51"},
+                        {"plate": "B58", "veh_class": "B59", "make": "B60", "color": "B61", "trans_no": "B62", "expiry": "B63", "seating": "B64", "damage": "B66", "name_en": "E58", "name_zh": "E59", "age": "E60", "addr_zh": "E61", "addr_en": "E62", "phone": "E63", "hkid": "E64", "lic_no": "E65", "dl_class": "E66"}
                     ]
                     
                     for idx, v in enumerate(vehicles_list):
@@ -380,21 +424,48 @@ if st.button(button_label):
                         ws_data[m["color"]] = v.get('color', '')
                         if v.get('transaction_no'): ws_data[m["trans_no"]] = v.get('transaction_no')
                         if v.get('expiry_date'): ws_data[m["expiry"]] = v.get('expiry_date')
+                        if v.get('seating_capacity'): ws_data[m["seating"]] = v.get('seating_capacity')
                         ws_data[m["damage"]] = v.get('damage', '')
                         
                         ws_data[m["name_en"]] = v.get('driver_name_en', '')
                         ws_data[m["name_zh"]] = v.get('driver_name_zh', '')
+                        if v.get('age'): ws_data[m["age"]] = v.get('age')
                         ws_data[m["addr_zh"]] = v.get('address_zh', '')
                         ws_data[m["addr_en"]] = v.get('address_en', '')
                         ws_data[m["phone"]] = v.get('phone', '')
                         if v.get('hkid'): ws_data[m["hkid"]] = v.get('hkid')
                         ws_data[m["lic_no"]] = v.get('driving_license_no', '')
+                        if v.get('dl_class'): ws_data[m["dl_class"]] = v.get('dl_class')
+
+                    # 4. 傷者資料 100% 精準對齊 (B74 及 B77:E97 區塊)
+                    if data.get('injured_total'): ws_data['B74'] = data.get('injured_total')
+                    
+                    injured_list = data.get('injured_list', [])
+                    i_mappings = [
+                        {"en": "B77", "zh": "B78", "age": "B79", "azh": "B80", "aen": "B81", "ph": "B82", "vno": "B83", "hosp": "B84", "esc": "B85"},
+                        {"en": "E77", "zh": "E78", "age": "E79", "azh": "E80", "aen": "E81", "ph": "E82", "vno": "E83", "hosp": "E84", "esc": "E85"},
+                        {"en": "B89", "zh": "B90", "age": "B91", "azh": "B92", "aen": "B93", "ph": "B94", "vno": "B95", "hosp": "B96", "esc": "B97"},
+                        {"en": "E89", "zh": "E90", "age": "E91", "azh": "E92", "aen": "E93", "ph": "E94", "vno": "E95", "hosp": "E96", "esc": "E97"}
+                    ]
+                    
+                    for idx, inj in enumerate(injured_list):
+                        if idx >= len(i_mappings): break
+                        im = i_mappings[idx]
+                        ws_data[im["en"]] = inj.get('name_en', '')
+                        ws_data[im["zh"]] = inj.get('name_zh', '')
+                        if inj.get('age'): ws_data[im["age"]] = inj.get('age')
+                        ws_data[im["azh"]] = inj.get('address_zh', '')
+                        ws_data[im["aen"]] = inj.get('address_en', '')
+                        ws_data[im["ph"]] = inj.get('phone', '')
+                        ws_data[im["vno"]] = inj.get('vehicle_no', '')
+                        ws_data[im["hosp"]] = inj.get('hospital', '')
+                        ws_data[im["esc"]] = inj.get('escort', '')
 
                     if statement:
                         ws_police.cell(row=5, column=1, value=f"現場紀錄及司機口供：\n{statement}")
                     
                     wb.save(output_path)
-                    st.success(f"🎉 TAPI 白皮書生成成功！(模型：{used_model_name})")
+                    st.success(f"🎉 TAPI 白皮書生成成功！(已精準修復警察編號、隧道時間及傷者欄位！)")
                     
                     with open(output_path, "rb") as file:
                         st.download_button(
