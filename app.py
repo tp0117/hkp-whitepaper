@@ -107,7 +107,7 @@ if st.button("🚀 立即生成 Excel 白皮書"):
                 contents = images + [prompt]
                 
                 response = client.models.generate_content(
-                    model='gemini-2.0-flash',
+                    model='gemini-3.8-flash',
                     contents=contents,
                     config=types.GenerateContentConfig(
                         response_mime_type="application/json"
