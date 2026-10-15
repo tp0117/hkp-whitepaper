@@ -77,12 +77,13 @@ if st.button("🚀 立即生成 Excel 白皮書"):
                 {statement}
                 
                 【行車證 (Vehicle Licence) 特別提取要求】：
-                1. plate_no：車牌號碼。
-                2. transaction_no：行車證上的交易編號 / Transaction No.。
-                3. vehicle_class：行車證上的 Class / 車輛類別 (如 PRIVATE CAR, LIGHT GOODS VEHICLE, TAXI 等)。
-                4. make：車輛廠名 (如 TOYOTA, MERCEDES-BENZ)。
-                5. color：車輛顏色。
-                6. seating_capacity：行車證上的座位 / 載客額 (Seating Capacity)。
+                1. plate_no：車牌號碼 (如 UG8125)。
+                2. vehicle_class：行車證上的 Class / 車輛類別 (如 PRIVATE CAR, LIGHT GOODS VEHICLE, TAXI 等)。
+                3. make：車輛廠名 (如 TOYOTA, HYUNDAI)。
+                4. color：車輛顏色 (如 SILVER)。
+                5. transaction_no：行車證上的車輛牌照號碼 / 交易編號 Transaction No. (如 C06-0123)。
+                6. expiry_date：行車證牌照期滿日期 (如 DD/MM/YYYY 或 DD-MM-YYYY)。
+                7. seating_capacity：行車證上的車輛載客額 Seating Capacity (如數字 5 或 4)。
                 
                 【駕駛執照 (Driving Licence) 特別提取要求】：
                 1. driving_license_no：駕駛執照號碼 (請移除括號)。
@@ -114,10 +115,11 @@ if st.button("🚀 立即生成 Excel 白皮書"):
                     "vehicles": [
                         {{
                             "plate_no": "車牌號碼",
-                            "transaction_no": "行車證交易編號 Transaction No.",
-                            "vehicle_class": "行車證車輛類別 Class (如 PRIVATE CAR)",
+                            "vehicle_class": "行車證車輛類別 Class (如 LIGHT GOODS VEHICLE)",
                             "make": "車輛廠名 (如 TOYOTA)",
-                            "color": "車輛顏色",
+                            "color": "車輛顏色 (如 SILVER)",
+                            "transaction_no": "車輛牌照號碼 / Transaction No.",
+                            "expiry_date": "期滿日期",
                             "seating_capacity": "車輛載客額 Seating Capacity",
                             "damage": "該車損毀性質及程度",
                             "driver_name_en": "司機英文姓名",
@@ -188,22 +190,23 @@ if st.button("🚀 立即生成 Excel 白皮書"):
                 if data.get('ai_arrived_time'): ws_data['E5'] = data.get('ai_arrived_time')
                 if data.get('ai_departed_time'): ws_data['E6'] = data.get('ai_departed_time')
                 
-                # 2. 車輛 1 ~ 4 儲存格映射表 (包含新增的交易編號、車輛類別、載客額及駕照類別)
+                # 2. 車輛 1 ~ 4 儲存格映射表 (完全對齊 Excel A 欄標題)
                 v_mappings = [
-                    {"plate": "B12", "trans_no": "B13", "veh_class": "B14", "make": "B15", "color": "B16", "seating": "B17", "damage": "B20", "name_en": "E12", "name_zh": "E13", "age": "E14", "addr_zh": "E15", "addr_en": "E16", "phone": "E17", "hkid": "E18", "lic_no": "E19", "dl_class": "E20"},
-                    {"plate": "B27", "trans_no": "B28", "veh_class": "B29", "make": "B30", "color": "B31", "seating": "B32", "damage": "B35", "name_en": "E27", "name_zh": "E28", "age": "E29", "addr_zh": "E30", "addr_en": "E31", "phone": "E32", "hkid": "E33", "lic_no": "E34", "dl_class": "E35"},
-                    {"plate": "B43", "trans_no": "B44", "veh_class": "B45", "make": "B46", "color": "B47", "seating": "B48", "damage": "B51", "name_en": "E43", "name_zh": "E44", "age": "E45", "addr_zh": "E46", "addr_en": "E47", "phone": "E48", "hkid": "E49", "lic_no": "E50", "dl_class": "E51"},
-                    {"plate": "B58", "trans_no": "B59", "veh_class": "B60", "make": "B61", "color": "B62", "seating": "B63", "damage": "B66", "name_en": "E58", "name_zh": "E59", "age": "E60", "addr_zh": "E61", "addr_en": "E62", "phone": "E63", "hkid": "E64", "lic_no": "E65", "dl_class": "E66"}
+                    {"plate": "B12", "veh_class": "B13", "make": "B14", "color": "B15", "trans_no": "B16", "expiry": "B17", "seating": "B18", "damage": "B20", "name_en": "E12", "name_zh": "E13", "age": "E14", "addr_zh": "E15", "addr_en": "E16", "phone": "E17", "hkid": "E18", "lic_no": "E19", "dl_class": "E20"},
+                    {"plate": "B27", "veh_class": "B28", "make": "B29", "color": "B30", "trans_no": "B31", "expiry": "B32", "seating": "B33", "damage": "B35", "name_en": "E27", "name_zh": "E28", "age": "E29", "addr_zh": "E30", "addr_en": "E31", "phone": "E32", "hkid": "E33", "lic_no": "E34", "dl_class": "E35"},
+                    {"plate": "B43", "veh_class": "B44", "make": "B45", "color": "B46", "trans_no": "B47", "expiry": "B48", "seating": "B49", "damage": "B51", "name_en": "E43", "name_zh": "E44", "age": "E45", "addr_zh": "E46", "addr_en": "E47", "phone": "E48", "hkid": "E49", "lic_no": "E50", "dl_class": "E51"},
+                    {"plate": "B58", "veh_class": "B59", "make": "B60", "color": "B61", "trans_no": "B62", "expiry": "B63", "seating": "B64", "damage": "B66", "name_en": "E58", "name_zh": "E59", "age": "E60", "addr_zh": "E61", "addr_en": "E62", "phone": "E63", "hkid": "E64", "lic_no": "E65", "dl_class": "E66"}
                 ]
                 
                 for idx, v in enumerate(vehicles_list):
                     if idx >= len(v_mappings): break
                     m = v_mappings[idx]
                     ws_data[m["plate"]] = v.get('plate_no', '')
-                    if v.get('transaction_no'): ws_data[m["trans_no"]] = v.get('transaction_no')
                     if v.get('vehicle_class'): ws_data[m["veh_class"]] = v.get('vehicle_class')
                     ws_data[m["make"]] = v.get('make', '')
                     ws_data[m["color"]] = v.get('color', '')
+                    if v.get('transaction_no'): ws_data[m["trans_no"]] = v.get('transaction_no')
+                    if v.get('expiry_date'): ws_data[m["expiry"]] = v.get('expiry_date')
                     if v.get('seating_capacity'): ws_data[m["seating"]] = v.get('seating_capacity')
                     ws_data[m["damage"]] = v.get('damage', '')
                     
@@ -225,7 +228,7 @@ if st.button("🚀 立即生成 Excel 白皮書"):
                     {"en": "B77", "zh": "B78", "age": "B79", "azh": "B80", "aen": "B81", "ph": "B82", "vno": "B83", "hosp": "B84", "esc": "B85"},
                     {"en": "E77", "zh": "E78", "age": "E79", "azh": "E80", "aen": "E81", "ph": "E82", "vno": "E83", "hosp": "E84", "esc": "E85"},
                     {"en": "B89", "zh": "B90", "age": "B91", "azh": "B92", "aen": "B93", "ph": "B94", "vno": "B95", "hosp": "B96", "esc": "B97"},
-                    {"en": "E89", "zh": "E90", "age": "E91", "azh": "E80", "aen": "E93", "ph": "E94", "vno": "E95", "hosp": "E96", "esc": "E97"}
+                    {"en": "E89", "zh": "E90", "age": "E91", "azh": "E92", "aen": "E93", "ph": "E94", "vno": "E95", "hosp": "E96", "esc": "E97"}
                 ]
                 
                 for idx, inj in enumerate(injured_list):
@@ -247,7 +250,7 @@ if st.button("🚀 立即生成 Excel 白皮書"):
                 
                 wb.save(output_path)
                 
-                st.success("🎉 白皮書生成成功！已精準提取行車證詳細規格及駕駛執照類別！")
+                st.success("🎉 白皮書生成成功！已精準對齊 Excel 所有車輛規格及欄位！")
                 
                 # 下載按鈕
                 with open(output_path, "rb") as file:
