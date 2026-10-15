@@ -4,7 +4,6 @@ from google import genai
 from google.genai import types
 import json
 import os
-import time
 from PIL import Image
 
 # 網頁標題及頁面設定
@@ -47,6 +46,16 @@ with st.sidebar:
     st.markdown("[按此免費獲取 Google Gemini API Key](https://aistudio.google.com/)")
     
     st.divider()
+    
+    # 🤖 允許使用者自選 Gemini AI 模型
+    selected_model = st.selectbox(
+        "🤖 選擇 AI 模型",
+        ["gemini-2.5-flash", "gemini-3.8-flash", "gemini-2.5-pro"],
+        index=0,
+        help="若目前模型跳出額度滿或過載提示，可在這裡切換至其他模型續用"
+    )
+    
+    st.divider()
     if st.button("🔒 登出系統"):
         st.session_state["authenticated"] = False
         st.rerun()
@@ -65,7 +74,7 @@ if st.button("🚀 立即生成 Excel 白皮書"):
     elif not uploaded_files and not statement:
         st.error("請上載最少一張相片或輸入文字資料！")
     else:
-        with st.spinner('AI 正在全方位辨識相片（含行車證詳細規格、駕照 Full Class 類別及手寫字）...'):
+        with st.spinner(f'AI ({selected_model}) 正在全方位辨識相片（含行車證詳細規格、駕照 Full Class 類別及手寫字）...'):
             try:
                 client = genai.Client(api_key=api_key.strip())
                 images = [Image.open(file) for file in uploaded_files] if uploaded_files else []
@@ -153,29 +162,18 @@ if st.button("🚀 立即生成 Excel 白皮書"):
                 
                 contents = images + [prompt]
                 
-                # 正確且最新相容的模型順序清單：優先 2.5-flash（穩定且高配額），備用 3.8-flash 與 1.5-flash
-                candidate_models = ['gemini-2.5-flash', 'gemini-3.8-flash', 'gemini-1.5-flash-latest']
-                response = None
-                last_exception = None
-
-                for model_name in candidate_models:
-                    try:
-                        response = client.models.generate_content(
-                            model=model_name,
-                            contents=contents,
-                            config=types.GenerateContentConfig(
-                                response_mime_type="application/json"
-                            )
-                        )
-                        if response and response.text:
-                            break
-                    except Exception as e:
-                        last_exception = e
-                        time.sleep(1)
-                        continue
-
+                # 直接調用使用者在選單中選取的模型
+                response = client.models.generate_content(
+                    model=selected_model,
+                    contents=contents,
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json"
+                    )
+                )
+                
                 if not response or not response.text:
-                    raise last_exception if last_exception else Exception("無法從 Google API 取得回應，請稍後再試。")
+                    st.error("AI 未能傳回有效的資料，請重試或切換模型。")
+                    st.stop()
                 
                 data = json.loads(response.text)
                 
@@ -243,7 +241,7 @@ if st.button("🚀 立即生成 Excel 白皮書"):
                 injured_list = data.get('injured_list', [])
                 i_mappings = [
                     {"en": "B77", "zh": "B78", "age": "B79", "azh": "B80", "aen": "B81", "ph": "B82", "vno": "B83", "hosp": "B84", "esc": "B85"},
-                    {"en": "E77", "zh": "E78", "age": "E79", "azh": "E80", "aen": "E81", "ph": "E82", "vno": "E83", "hosp": "E84", "esc": "E85"},
+                    {"en": "E77", "zh": "E78", "age": "E79", "azh": "E78", "aen": "E81", "ph": "E82", "vno": "E83", "hosp": "E84", "esc": "E85"},
                     {"en": "B89", "zh": "B90", "age": "B91", "azh": "B92", "aen": "B93", "ph": "B94", "vno": "B95", "hosp": "B96", "esc": "B97"},
                     {"en": "E89", "zh": "E90", "age": "E91", "azh": "E92", "aen": "E93", "ph": "E94", "vno": "E95", "hosp": "E96", "esc": "E97"}
                 ]
@@ -267,7 +265,7 @@ if st.button("🚀 立即生成 Excel 白皮書"):
                 
                 wb.save(output_path)
                 
-                st.success("🎉 白皮書生成成功！已精準對齊 Excel 所有車輛規格及欄位！")
+                st.success(f"🎉 白皮書生成成功！(使用的是 {selected_model} 模型)")
                 
                 # 下載按鈕
                 with open(output_path, "rb") as file:
@@ -282,4 +280,10 @@ if st.button("🚀 立即生成 Excel 白皮書"):
                     os.remove(output_path)
                 
             except Exception as e:
-                st.error(f"發生錯誤：{str(e)}")
+                err_str = str(e)
+                if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                    st.error(f"⚠️ 模型 {selected_model} 今日免費次數已滿（429）。請在左側選單切換至其他模型（如 gemini-2.5-flash 或 gemini-2.5-pro）再按一次生成！")
+                elif "503" in err_str or "UNAVAILABLE" in err_str:
+                    st.error(f"⚠️ Google 伺服器短暫過載（503）。請等 5 秒後重試，或在左側選單切換其他模型。")
+                else:
+                    st.error(f"發生錯誤：{err_str}")
