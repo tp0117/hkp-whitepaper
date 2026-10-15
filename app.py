@@ -4,6 +4,7 @@ from google import genai
 from google.genai import types
 import json
 import os
+import time
 from PIL import Image
 
 # 網頁標題及頁面設定
@@ -152,13 +153,29 @@ if st.button("🚀 立即生成 Excel 白皮書"):
                 
                 contents = images + [prompt]
                 
-                response = client.models.generate_content(
-                    model='gemini-2.5-flash',
-                    contents=contents,
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json"
-                    )
-                )
+                # 正確且最新相容的模型順序清單：優先 2.5-flash（穩定且高配額），備用 3.8-flash 與 1.5-flash
+                candidate_models = ['gemini-2.5-flash', 'gemini-3.8-flash', 'gemini-1.5-flash-latest']
+                response = None
+                last_exception = None
+
+                for model_name in candidate_models:
+                    try:
+                        response = client.models.generate_content(
+                            model=model_name,
+                            contents=contents,
+                            config=types.GenerateContentConfig(
+                                response_mime_type="application/json"
+                            )
+                        )
+                        if response and response.text:
+                            break
+                    except Exception as e:
+                        last_exception = e
+                        time.sleep(1)
+                        continue
+
+                if not response or not response.text:
+                    raise last_exception if last_exception else Exception("無法從 Google API 取得回應，請稍後再試。")
                 
                 data = json.loads(response.text)
                 
