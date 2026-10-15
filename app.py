@@ -506,21 +506,21 @@ if st.button(button_label):
                     if statement:
                         ws_police.cell(row=5, column=1, value=f"現場紀錄及司機口供：\n{statement}")
                     
-                    # 5. 自動將 car_diagram.png 車仔圖形補回 P.1 (J54) 及 P.2 (J54, J110)
+                    # 5. 精準將 car_diagram.png 車仔圖形植入 P.1 (J43) 及 P.2 (J43, J99)
                     if os.path.exists("car_diagram.png"):
                         if 'P.1' in wb.sheetnames:
                             ws_p1 = wb['P.1']
                             img_p1 = OpenpyxlImage("car_diagram.png")
-                            ws_p1.add_image(img_p1, 'J54')
+                            ws_p1.add_image(img_p1, 'J43')
                         if 'P.2' in wb.sheetnames:
                             ws_p2 = wb['P.2']
                             img_p2_1 = OpenpyxlImage("car_diagram.png")
                             img_p2_2 = OpenpyxlImage("car_diagram.png")
-                            ws_p2.add_image(img_p2_1, 'J54')
-                            ws_p2.add_image(img_p2_2, 'J110')
+                            ws_p2.add_image(img_p2_1, 'J43')
+                            ws_p2.add_image(img_p2_2, 'J99')
                     
                     wb.save(output_path)
-                    st.success(f"🎉 TAPI 白皮書生成成功！(已成功植入 P.1/P.2 車輛損毀圖形！)")
+                    st.success(f"🎉 TAPI 白皮書生成成功！(已精準對齊 P.1/P.2 損毀車輛部位框線！)")
                     
                     with open(output_path, "rb") as file:
                         st.download_button(
