@@ -1,5 +1,6 @@
 import streamlit as st
 import openpyxl
+from openpyxl.drawing.image import Image as OpenpyxlImage
 from google import genai
 from google.genai import types
 import json
@@ -272,7 +273,7 @@ if st.button(button_label):
     elif not images_with_tags and not statement:
         st.error("請最少上載一張相片或輸入文字資料！")
     else:
-        with st.spinner('AI 正在全方位辨識（包含車牌尾數與口供格式化）...'):
+        with st.spinner('AI 正在全方位辨識（包含自動植入損毀車仔圖形與排版）...'):
             try:
                 client = genai.Client(api_key=api_key.strip())
                 raw_images = [item[0] for item in images_with_tags]
@@ -505,8 +506,21 @@ if st.button(button_label):
                     if statement:
                         ws_police.cell(row=5, column=1, value=f"現場紀錄及司機口供：\n{statement}")
                     
+                    # 5. 自動將 car_diagram.png 車仔圖形補回 P.1 (J54) 及 P.2 (J54, J110)
+                    if os.path.exists("car_diagram.png"):
+                        if 'P.1' in wb.sheetnames:
+                            ws_p1 = wb['P.1']
+                            img_p1 = OpenpyxlImage("car_diagram.png")
+                            ws_p1.add_image(img_p1, 'J54')
+                        if 'P.2' in wb.sheetnames:
+                            ws_p2 = wb['P.2']
+                            img_p2_1 = OpenpyxlImage("car_diagram.png")
+                            img_p2_2 = OpenpyxlImage("car_diagram.png")
+                            ws_p2.add_image(img_p2_1, 'J54')
+                            ws_p2.add_image(img_p2_2, 'J110')
+                    
                     wb.save(output_path)
-                    st.success(f"🎉 TAPI 白皮書生成成功！(模型：{used_model_name})")
+                    st.success(f"🎉 TAPI 白皮書生成成功！(已成功植入 P.1/P.2 車輛損毀圖形！)")
                     
                     with open(output_path, "rb") as file:
                         st.download_button(
