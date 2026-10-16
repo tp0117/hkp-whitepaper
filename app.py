@@ -96,17 +96,17 @@ app_mode = st.radio(
 st.divider()
 
 # ----------------- 2. 分區上載相片 -----------------
-st.subheader("📸 2. 分類上載相片 (支援行車證、駕照、手填紀錄單、現場照片)")
+st.subheader("📸 2. 分類上載相片 (支援行車證、駕照、手填紀錄單 IMSP-T3、現場照片)")
 
 tab_main, tab_veh_a, tab_veh_b, tab_veh_c = st.tabs([
-    "📋 手填總表 / 現場紀錄照片",
+    "📋 手填紀錄單 (IMSP-T3) / 現場照片",
     "🚗 車輛 甲 (Vehicle A) 相片",
     "🚙 車輛 乙 (Vehicle B) 相片",
     "🚚 其他 / 車輛 丙 (Vehicle C) 相片"
 ])
 
 with tab_main:
-    files_main = st.file_uploader("請上載【手填紀錄單 / 現場照片 / 總表】", type=["jpg", "png", "jpeg"], accept_multiple_files=True, key="main_files")
+    files_main = st.file_uploader("請上載【手填紀錄單 (IMSP-T3) / 現場照片 / 總表】", type=["jpg", "png", "jpeg"], accept_multiple_files=True, key="main_files")
 
 with tab_veh_a:
     files_veh_a = st.file_uploader("請上載【車輛 甲 (Vehicle A)】的行車證及司機駕駛執照", type=["jpg", "png", "jpeg"], accept_multiple_files=True, key="veh_a_files")
@@ -263,7 +263,7 @@ if st.button(button_label):
                 imgs.append((img, category_label))
         return imgs
 
-    images_with_tags.extend(process_files(files_main, "手填總表/現場照片"))
+    images_with_tags.extend(process_files(files_main, "手填紀錄單 (IMSP-T3)"))
     images_with_tags.extend(process_files(files_veh_a, "車輛 甲 (Vehicle A)"))
     images_with_tags.extend(process_files(files_veh_b, "車輛 乙 (Vehicle B)"))
     images_with_tags.extend(process_files(files_veh_c, "車輛 丙 (Vehicle C)"))
@@ -273,7 +273,7 @@ if st.button(button_label):
     elif not images_with_tags and not statement:
         st.error("請最少上載一張相片或輸入文字資料！")
     else:
-        with st.spinner('AI 正在全方位辨識（包含精準對齊 P.1 / P.2 車仔圖形）...'):
+        with st.spinner('AI 正在全方位辨識（包含對齊 IMSP-T3 頂部車輛類別與傷者資訊）...'):
             try:
                 client = genai.Client(api_key=api_key.strip())
                 raw_images = [item[0] for item in images_with_tags]
@@ -281,7 +281,7 @@ if st.button(button_label):
                 
                 prompt = f"""
                 你是一個專業的香港交通意外資料提取助手。
-                請仔細分析所有上載的相片（特別是手填紙本紀錄、行車證、駕駛執照、現場照片）以及現場文字內容：
+                請仔細分析所有上載的相片（特別是東隧事故處理程序 IMSP-T3 手填紙本紀錄、行車證、駕駛執照、現場照片）以及現場文字內容：
                 
                 【相片來源分類】：
                 {photo_notes}
@@ -289,8 +289,29 @@ if st.button(button_label):
                 【補充文字內容與口供】：
                 {statement}
                 
+                【📋 手填紀錄單 IMSP-T3 頂部與表格欄位精準提取加強對應】：
+                1. 頂部「事故發生時間」：提取意外時間 (ta_time，如 1542)。
+                2. 頂部「車輛：」欄位 (如 "P/C 8161 / M/C WW 5031")：
+                   - P/C 代表 PRIVATE CAR (私家車)
+                   - M/C 代表 MOTORCYCLE (電單車)
+                   - L/G/V 或 LGV 代表 LIGHT GOODS VEHICLE (輕型貨車)
+                   - H/G/V 代表 HEAVY GOODS VEHICLE (重型貨車)
+                   - 請將提取出的車牌與車輛類型對應補入 vehicles 陣列的 plate_no, vehicle_class_en, vehicle_class_zh！
+                3. 頂部「受傷人數：」及上方手寫註記 (如 "M/C WW5031 司機" 或 "P/C 8161 乘客")：
+                   - injured_total: 受傷人數 (如 1)
+                   - 請解析手寫文字中的涉及車牌 (如 WW5031) 與受傷者身份，寫入 injured_list 傷者資料 (vehicle_no, escort/notes)！
+                4. 表格項目 1「東隧職員發現/到達現場時間」: tunnel_staff_arrived
+                5. 表格項目 8「警方到達時間」: police_arrived_time
+                6. 表格項目 8「警員編號」: police_no (普通軍裝警員編號，如 19626)
+                7. 表格項目 8 或 11「車牌」: police_veh_no (警車車牌，如 AM8049 / AM2795)
+                8. 表格項目 11「警方 AI 到達時間」: ai_arrived_time
+                9. 表格項目 11「警方 AI 警員編號」: ai_staff_no (如 PC14367)
+                10. 表格項目 11「警方 AI 離開時間」: ai_departed_time
+                11. 表格項目 12「警方檔案編號」: rn_no (如 RN=13913)
+                12. 表格項目 19「所有肇事車輛及政府人員離開」: tunnel_staff_departed (如 1648)
+                
                 【🚘 車牌號碼強制要求】：
-                - plate_no：必須完整提取並包含車牌的尾數字母/數字 (例如 UG8125 R, WA1062 Q, AB1234 A)。絕對不可以省略尾數！
+                - plate_no：必須完整提取並包含車牌的尾數字母/數字 (例如 UG8125 R, WA1062 Q, WW5031, AM8049)。絕對不可以省略尾數！
                 
                 【🌐 地址雙向翻譯強制要求 (100% 必須完成)】：
                 1. 司機及傷者的住址：相片中不論提供的是中文住址還是英文住址，你必須同時生成：
@@ -303,12 +324,6 @@ if st.button(button_label):
                 2. 駕駛執照號碼 (driving_license_no)：請照實提取，尾數【絕對不要添加括號】(例如 Y463269 7)。
                 3. dl_expiry_date (駕駛執照期滿日期)：駕駛執照上的有效期/屆滿日期 (如 DD/MM/YYYY 或 DD-MM-YYYY)。
                 
-                【嚴格警察與時間資料拆解要求】：
-                1. police_no（普通警員編號）：只提取軍裝/普通警員編號 (如 SPC 99088, PC 81818)。【絕對不可填入 AI 警員編號，更不可包含 AM 車牌】。
-                2. ai_staff_no（AI 人員編號）：交通意外調查組人員編號 (如 12345)。【必須與普通警員編號完全分開】。
-                3. tunnel_staff_arrived: 隧道職員到達時間。
-                4. tunnel_staff_departed: 隧道職員離開時間 / All Departed 時間。
-                
                 【受傷者 (Injured) 詳細資料與電話號碼提取】：
                 1. injured_total: 受傷者合共人數 (無人受傷填 "0")。
                 2. injured_list: 傷者列表陣列 (最多 4 人)，必須完整提取：
@@ -318,37 +333,37 @@ if st.button(button_label):
                    - address_zh: 完整中文住址 (需雙向翻譯)
                    - address_en: 完整英文住址 (需雙向翻譯)
                    - phone: 傷者電話號碼 (必須照實提取，不可遺漏)
-                   - vehicle_no: 涉及車牌號碼
+                   - vehicle_no: 涉及車牌號碼 (從 IMSP-T3 頂部標記如 WW5031 提取)
                    - hospital: 送往醫院
-                   - escort: 護送人/遞送人
+                   - escort: 護送人/遞送人/身份備註 (如 M/C WW5031 司機)
                 
                 請嚴格以 JSON 格式輸出：
                 {{
                     "log_no": "Log No 紀錄號碼",
-                    "rn_no": "HKP RN 報案號碼/案號 (如 RN:26002134)",
+                    "rn_no": "HKP RN 報案號碼/案號 (如 RN:13913)",
                     "ta_date": "意外日期",
-                    "ta_time": "意外時間",
+                    "ta_time": "意外時間 (如 1542)",
                     "location": "意外地點",
-                    "tunnel_staff_arrived": "隧道職員到達時間",
-                    "tunnel_staff_departed": "隧道職員離開時間",
-                    "police_arrived_time": "警察到達時間",
-                    "police_no": "普通警員編號 (如 SPC 99088, PC 81818)",
-                    "ai_staff_no": "交通意外調查組人員編號",
-                    "ai_arrived_time": "HKP AI 到達時間",
-                    "ai_departed_time": "HKP AI 離開時間",
-                    "police_veh_no": "警車車牌 (如 AM 8810)",
+                    "tunnel_staff_arrived": "隧道職員到達時間 (如 1542)",
+                    "tunnel_staff_departed": "隧道職員離開時間 (如 1648)",
+                    "police_arrived_time": "警察到達時間 (如 1604)",
+                    "police_no": "普通警員編號 (如 19626)",
+                    "ai_staff_no": "交通意外調查組人員編號 (如 PC14367)",
+                    "ai_arrived_time": "HKP AI 到達時間 (如 1616)",
+                    "ai_departed_time": "HKP AI 離開時間 (如 1640)",
+                    "police_veh_no": "警車車牌 (如 AM8049)",
                     "breathalyzer_test": "酒精呼氣測試紀錄",
                     "vehicles": [
                         {{
-                            "plate_no": "車牌號碼 (必須含尾數，如 UG8125 R 或 WA1062 Q)",
-                            "vehicle_class_en": "英文車輛類別 (如 LIGHT GOODS VEHICLE)",
-                            "vehicle_class_zh": "中文車輛類別 (如 輕型貨車)",
+                            "plate_no": "車牌號碼 (必須含尾數，如 WW5031 或 8161)",
+                            "vehicle_class_en": "英文車輛類別 (如 MOTORCYCLE)",
+                            "vehicle_class_zh": "中文車輛類別 (如 電單車)",
                             "gross_weight": "總重量",
                             "make": "車輛廠名 (如 TOYOTA)",
-                            "color": "車輛顏色 (如 SILVER-VAR)",
-                            "transaction_no": "存檔編號 C06-0123",
+                            "color": "車輛顏色",
+                            "transaction_no": "存檔編號",
                             "expiry_date": "屆滿日期 (無則 ———)",
-                            "seating_capacity": "載客額 (如 5)",
+                            "seating_capacity": "載客額",
                             "damage": "車輛損毀情況",
                             "driver_name_en": "司機英文姓名",
                             "driver_name_zh": "司機中文姓名",
@@ -356,14 +371,14 @@ if st.button(button_label):
                             "phone": "電話號碼",
                             "hkid": "身份證號碼 (尾數帶括號，如 G111759(8))",
                             "driving_license_no": "駕駛執照號碼 (無括號，如 Y463269 7)",
-                            "dl_class": "駕照 Full Class (如 1, 2, 18)",
+                            "dl_class": "駕照 Full Class (如 1, 2, 3)",
                             "dl_expiry_date": "駕駛執照期滿日期 (如 DD/MM/YYYY)",
                             "address_zh": "完整中文住址",
                             "address_en": "完整英文住址",
                             "driver_statement": "司機口供"
                         }}
                     ],
-                    "injured_total": "受傷者合共人數",
+                    "injured_total": "受傷者合共人數 (如 1)",
                     "injured_list": [
                         {{
                             "name_en": "傷者英文名",
@@ -372,9 +387,9 @@ if st.button(button_label):
                             "address_zh": "中文住址",
                             "address_en": "英文住址",
                             "phone": "電話號碼",
-                            "vehicle_no": "涉及車牌號碼",
+                            "vehicle_no": "涉及車牌號碼 (如 WW5031)",
                             "hospital": "送往醫院",
-                            "escort": "遞送人/護送人"
+                            "escort": "身份備註 (如 M/C WW5031 司機)"
                         }}
                     ]
                 }}
@@ -443,7 +458,7 @@ if st.button(button_label):
                     if data.get('ai_arrived_time'): ws_data['E5'] = data.get('ai_arrived_time')
                     if data.get('ai_departed_time'): ws_data['E6'] = data.get('ai_departed_time')
                     
-                    # 3. 車輛 1 ~ 4 儲存格精準映射 (修正 Driver 3: dl_class ➔ E51, dl_exp ➔ E52; Driver 4: dl_class ➔ E66, dl_exp ➔ E67)
+                    # 3. 車輛 1 ~ 4 儲存格精準映射 (Driver 1: E20/E21, Driver 2: E35/E36, Driver 3: E51/E52, Driver 4: E66/E67)
                     v_mappings = [
                         {"plate": "B12", "veh_class": "B13", "make": "B14", "color": "B15", "trans_no": "B16", "expiry": "B17", "seating": "B18", "damage": "B20", "name_en": "E12", "name_zh": "E13", "age": "E14", "addr_zh": "E15", "addr_en": "E16", "phone": "E17", "hkid": "E18", "lic_no": "E19", "dl_class": "E20", "dl_exp": "E21"},
                         {"plate": "B27", "veh_class": "B28", "make": "B29", "color": "B30", "trans_no": "B31", "expiry": "B32", "seating": "B33", "damage": "B35", "name_en": "E27", "name_zh": "E28", "age": "E29", "addr_zh": "E30", "addr_en": "E31", "phone": "E32", "hkid": "E33", "lic_no": "E34", "dl_class": "E35", "dl_exp": "E36"},
@@ -477,7 +492,7 @@ if st.button(button_label):
                         if hkid_val: ws_data[m["hkid"]] = hkid_val
                         if lic_val: ws_data[m["lic_no"]] = lic_val
                         if v.get('dl_class'): ws_data[m["dl_class"]] = v.get('dl_class')
-                        if v.get('dl_expiry_date'): ws_data[m["dl_exp"]] = v.get('dl_expiry_date') # Driver 3: E52, Driver 4: E67
+                        if v.get('dl_expiry_date'): ws_data[m["dl_exp"]] = v.get('dl_expiry_date')
 
                     # 4. 傷者資料 100% 精準對齊 (含電話號碼與雙向翻譯地址)
                     if data.get('injured_total'): ws_data['B74'] = data.get('injured_total')
@@ -531,7 +546,7 @@ if st.button(button_label):
                             ws_p2.add_image(img_p2_2, 'H39')
                     
                     wb.save(output_path)
-                    st.success(f"🎉 TAPI 白皮書生成成功！(已完美修復 Driver 3 駕照 Class 及期滿日期！)")
+                    st.success(f"🎉 TAPI 白皮書生成成功！(已完美對齊 IMSP-T3 頂部車輛類別與傷者資訊！)")
                     
                     with open(output_path, "rb") as file:
                         st.download_button(
