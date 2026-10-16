@@ -48,11 +48,15 @@ st.markdown("""
         box-shadow: 0 4px 6px rgba(0,0,0,0.1);
     }
     
-    /* 強化單選框與 Tab 的手機點擊範圍 */
+    /* 修復深色模式 (Dark Mode) 下單選框文字變白看不清的問題 */
     div[role="radiogroup"] {
-        padding: 8px;
+        padding: 10px;
         background-color: #f0f2f6;
         border-radius: 8px;
+    }
+    div[role="radiogroup"] * {
+        color: #0c1a30 !important;
+        font-weight: 600 !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -581,7 +585,7 @@ if st.button(button_label):
                             ws_p2.add_image(img_p2_2, 'H39')
                     
                     wb.save(output_path)
-                    st.success(f"🎉 TAPI 白皮書生成成功！(已套用全螢幕 App 手機美化介面！)")
+                    st.success(f"🎉 TAPI 白皮書生成成功！")
                     
                     with open(output_path, "rb") as file:
                         st.download_button(
