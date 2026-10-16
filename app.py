@@ -443,12 +443,12 @@ if st.button(button_label):
                     if data.get('ai_arrived_time'): ws_data['E5'] = data.get('ai_arrived_time')
                     if data.get('ai_departed_time'): ws_data['E6'] = data.get('ai_departed_time')
                     
-                    # 3. 車輛 1 ~ 4 儲存格精準映射 (含駕照期滿日期 dl_exp ➔ E21 / E36 / E51 / E66)
+                    # 3. 車輛 1 ~ 4 儲存格精準映射 (修正 Driver 3: dl_class ➔ E51, dl_exp ➔ E52; Driver 4: dl_class ➔ E66, dl_exp ➔ E67)
                     v_mappings = [
                         {"plate": "B12", "veh_class": "B13", "make": "B14", "color": "B15", "trans_no": "B16", "expiry": "B17", "seating": "B18", "damage": "B20", "name_en": "E12", "name_zh": "E13", "age": "E14", "addr_zh": "E15", "addr_en": "E16", "phone": "E17", "hkid": "E18", "lic_no": "E19", "dl_class": "E20", "dl_exp": "E21"},
                         {"plate": "B27", "veh_class": "B28", "make": "B29", "color": "B30", "trans_no": "B31", "expiry": "B32", "seating": "B33", "damage": "B35", "name_en": "E27", "name_zh": "E28", "age": "E29", "addr_zh": "E30", "addr_en": "E31", "phone": "E32", "hkid": "E33", "lic_no": "E34", "dl_class": "E35", "dl_exp": "E36"},
-                        {"plate": "B43", "veh_class": "B44", "make": "B45", "color": "B46", "trans_no": "B47", "expiry": "B48", "seating": "B49", "damage": "B51", "name_en": "E43", "name_zh": "E44", "age": "E45", "addr_zh": "E46", "addr_en": "E47", "phone": "E48", "hkid": "E49", "lic_no": "E50", "dl_class": "E51", "dl_exp": "E51"},
-                        {"plate": "B58", "veh_class": "B59", "make": "B60", "color": "B61", "trans_no": "B62", "expiry": "B63", "seating": "B64", "damage": "B66", "name_en": "E58", "name_zh": "E59", "age": "E60", "addr_zh": "E61", "addr_en": "E62", "phone": "E63", "hkid": "E64", "lic_no": "E65", "dl_class": "E66", "dl_exp": "E66"}
+                        {"plate": "B43", "veh_class": "B44", "make": "B45", "color": "B46", "trans_no": "B47", "expiry": "B48", "seating": "B49", "damage": "B51", "name_en": "E43", "name_zh": "E44", "age": "E45", "addr_zh": "E46", "addr_en": "E47", "phone": "E48", "hkid": "E49", "lic_no": "E50", "dl_class": "E51", "dl_exp": "E52"},
+                        {"plate": "B58", "veh_class": "B59", "make": "B60", "color": "B61", "trans_no": "B62", "expiry": "B63", "seating": "B64", "damage": "B66", "name_en": "E58", "name_zh": "E59", "age": "E60", "addr_zh": "E61", "addr_en": "E62", "phone": "E63", "hkid": "E64", "lic_no": "E65", "dl_class": "E66", "dl_exp": "E67"}
                     ]
                     
                     for idx, v in enumerate(vehicles_list):
@@ -477,7 +477,7 @@ if st.button(button_label):
                         if hkid_val: ws_data[m["hkid"]] = hkid_val
                         if lic_val: ws_data[m["lic_no"]] = lic_val
                         if v.get('dl_class'): ws_data[m["dl_class"]] = v.get('dl_class')
-                        if v.get('dl_expiry_date'): ws_data[m["dl_exp"]] = v.get('dl_expiry_date') # 駕駛執照期滿日期 填入 E21/E36/E51/E66
+                        if v.get('dl_expiry_date'): ws_data[m["dl_exp"]] = v.get('dl_expiry_date') # Driver 3: E52, Driver 4: E67
 
                     # 4. 傷者資料 100% 精準對齊 (含電話號碼與雙向翻譯地址)
                     if data.get('injured_total'): ws_data['B74'] = data.get('injured_total')
@@ -531,7 +531,7 @@ if st.button(button_label):
                             ws_p2.add_image(img_p2_2, 'H39')
                     
                     wb.save(output_path)
-                    st.success(f"🎉 TAPI 白皮書生成成功！(已精準對齊 P.1 I41 與 P.2 H14/H39 獨立圖片尺寸！)")
+                    st.success(f"🎉 TAPI 白皮書生成成功！(已完美修復 Driver 3 駕照 Class 及期滿日期！)")
                     
                     with open(output_path, "rb") as file:
                         st.download_button(
