@@ -7,6 +7,7 @@ import json
 import os
 import time
 import re
+import urllib.parse
 from PIL import Image
 
 # 嘗試載入 python-docx 用於生成 Word 檔
@@ -36,7 +37,7 @@ st.markdown("""
         padding-right: 1rem;
     }
     
-    /* 放大生成按鈕，適合手機大拇指點擊 */
+    /* 放大生成與重置按鈕，適合手機大拇指點擊 */
     div.stButton > button:first-child {
         width: 100%;
         height: 3.2rem;
@@ -45,6 +46,24 @@ st.markdown("""
         background-color: #003366 !important;
         color: white !important;
         border-radius: 10px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    
+    /* WhatsApp 分享按鈕專用綠色樣式 */
+    .wa-button {
+        display: block;
+        width: 100%;
+        height: 3.2rem;
+        line-height: 3.2rem;
+        text-align: center;
+        background-color: #25D366;
+        color: white !important;
+        font-size: 1.1rem;
+        font-weight: bold;
+        border-radius: 10px;
+        text-decoration: none;
+        margin-top: 10px;
+        margin-bottom: 10px;
         box-shadow: 0 4px 6px rgba(0,0,0,0.1);
     }
     
@@ -94,11 +113,17 @@ if not st.session_state["authenticated"]:
         else:
             st.error("密碼錯誤，請重新輸入！")
     
-    st.stop()  # 密碼未通過前，停止執行後續所有系統邏輯
+    st.stop()
 
 # ----------------- 以下為驗證通過後的系統主介面 -----------------
 
 st.title("🚓 交通意外資料處理系統 (TAPI 白皮書 / TADO Word 附錄)")
+
+# 頂部控制欄：提供重置/重新開始按鈕
+top_col1, top_col2 = st.columns([3, 1])
+with top_col2:
+    if st.button("🔄 重置頁面"):
+        st.rerun()
 
 # 優先從 Secrets 讀取 Gemini API Key
 default_api_key = st.secrets.get("GEMINI_API_KEY", "")
@@ -111,7 +136,6 @@ with st.sidebar:
     
     st.divider()
     
-    # 🤖 允許使用者自選 Gemini AI 模型
     selected_model = st.selectbox(
         "🤖 首選 AI 模型",
         ["gemini-3.8-flash", "gemini-1.5-flash", "gemini-2.5-pro"],
@@ -168,8 +192,6 @@ def generate_tado_word(data, statement_text):
         return None
     try:
         doc = docx.Document()
-        
-        # 標題
         h = doc.add_heading('交通意外 (TADO) 附錄報告', level=1)
         if hasattr(WD_ALIGN_PARAGRAPH, 'CENTER'):
             h.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -177,80 +199,65 @@ def generate_tado_word(data, statement_text):
         vehicles = data.get('vehicles', [])
         veh_labels = ["甲", "乙", "丙", "丁", "戊"]
         
-        # 車輛及司機資料逐一生成
         for idx, v in enumerate(vehicles):
             label_char = veh_labels[idx] if idx < len(veh_labels) else str(idx + 1)
             doc.add_heading(f"車輛{label_char}：", level=2)
-            
             p = doc.add_paragraph()
             p.paragraph_format.line_spacing = 1.2
             
-            # 1) 車牌 (必須包含尾數)
             plate = v.get('plate_no', '———')
             p.add_run(f"1）車牌： ").bold = True
             p.add_run(f"{plate}\n")
             
-            # 2) 車輛類型 (英/中)
             v_class_en = v.get('vehicle_class_en', v.get('vehicle_class', '———'))
             v_class_zh = v.get('vehicle_class_zh', '———')
             v_type_str = f"{v_class_en} / {v_class_zh}" if v_class_zh != '———' else v_class_en
             p.add_run(f"2）車輛類型： ").bold = True
             p.add_run(f"{v_type_str}\n")
             
-            # 3) 總重量
             weight = v.get('gross_weight', '———')
             p.add_run(f"3）總重量： ").bold = True
             p.add_run(f"{weight}\n")
             
-            # 4) 廠名
             make = v.get('make', '———')
             p.add_run(f"4）廠名： ").bold = True
             p.add_run(f"{make}\n")
             
-            # 5) 顏色
             color = v.get('color', '———')
             p.add_run(f"5）顏色： ").bold = True
             p.add_run(f"{color}\n")
             
-            # 6) 存檔編號
             trans_no = v.get('transaction_no', '———')
             p.add_run(f"6）存檔編號： ").bold = True
             p.add_run(f"{trans_no}\n")
             
-            # 7) 屆滿日期
             exp = v.get('expiry_date', '———')
             p.add_run(f"7）屆滿日期： ").bold = True
             p.add_run(f"{exp}\n")
             
-            # 8) 駕駛人
             d_en = v.get('driver_name_en', '')
             d_zh = v.get('driver_name_zh', '')
             driver_str = f"{d_en} ({d_zh})" if d_zh else (d_en if d_en else '———')
             p.add_run(f"8）駕駛人： ").bold = True
             p.add_run(f"{driver_str}\n")
             
-            # 9) 駕駛執照號碼 (不加尾數括號)
             lic_no = v.get('driving_license_no', '———')
             p.add_run(f"9）駕駛執照號碼： ").bold = True
             p.add_run(f"{lic_no}\n")
             
-            # 10) 地址 (中英文雙向翻譯)
             addr_zh = v.get('address_zh', '———')
             addr_en = v.get('address_en', '———')
             p.add_run(f"10）地址： ").bold = True
             p.add_run(f"\n   中文：{addr_zh}\n   英文：{addr_en}\n")
             
-            # 11) 電話號碼
             phone = v.get('phone', '———')
             p.add_run(f"11）電話號碼： ").bold = True
             p.add_run(f"{phone}\n")
             
-            # 12) 車輛損毀情況
             damage = v.get('damage', '———')
             p.add_run(f"12）車輛損毀情況： ").bold = True
             p.add_run(f"{damage}\n")
             
-            # 13) 司機口供 (自動以「」括住)
             d_statement = v.get('driver_statement', statement_text if statement_text else '———')
             if d_statement and d_statement != '———':
                 s_clean = d_statement.strip()
@@ -264,7 +271,6 @@ def generate_tado_word(data, statement_text):
             p.add_run(f"13）司機口供： ").bold = True
             p.add_run(f"{d_statement_formatted}\n")
 
-        # 結尾：警方資料及酒精呼氣測試
         doc.add_heading("警方資料及測試紀錄：", level=2)
         p_police = doc.add_paragraph()
         p_police.paragraph_format.line_spacing = 1.2
@@ -471,7 +477,13 @@ if st.button(button_label):
                 
                 vehicles_list = data.get('vehicles', [])
                 first_plate = vehicles_list[0].get('plate_no', 'Unknown').replace(' ', '_') if len(vehicles_list) > 0 else 'Unknown'
+                rn_val = data.get('rn_no', '無')
+                ta_time_val = data.get('ta_time', '無')
                 
+                # 準備 WhatsApp 案件通報文字
+                wa_text = f"🚓【交通意外報告已生成】\n• RN編號：{rn_val}\n• 意外時間：{ta_time_val}\n• 涉及車牌：{first_plate}\n• 模式：{'TAPI 白皮書 (Excel)' if 'TAPI' in app_mode else 'TADO 附錄 (Word)'}\n請在附件接收報告檔。"
+                wa_url = f"https://api.whatsapp.com/send?text={urllib.parse.quote(wa_text)}"
+
                 # 分流處理：TAPI (Excel 白皮書) 或 TADO (Word 附錄)
                 if "TAPI" in app_mode:
                     template_path = "T26_白皮書_template_v2.xlsx"
@@ -481,7 +493,6 @@ if st.button(button_label):
                     ws_data = wb['Data']
                     ws_police = wb['Police']
                     
-                    # 1. 頂部案件與隧道時間
                     if data.get('log_no'): ws_data['B1'] = data.get('log_no')
                     if data.get('rn_no'): ws_data['B2'] = data.get('rn_no')
                     if data.get('ta_date'): ws_data['B3'] = data.get('ta_date')
@@ -490,14 +501,12 @@ if st.button(button_label):
                     if data.get('tunnel_staff_arrived'): ws_data['B6'] = data.get('tunnel_staff_arrived')
                     if data.get('tunnel_staff_departed'): ws_data['B7'] = data.get('tunnel_staff_departed')
                     
-                    # 2. 警察資料精準獨立拆解 (E 欄)
                     if data.get('police_arrived_time'): ws_data['E2'] = data.get('police_arrived_time')
-                    if data.get('police_no'): ws_data['E3'] = data.get('police_no')          # 普通警員
-                    if data.get('ai_staff_no'): ws_data['E4'] = data.get('ai_staff_no')        # AI Staff
+                    if data.get('police_no'): ws_data['E3'] = data.get('police_no')
+                    if data.get('ai_staff_no'): ws_data['E4'] = data.get('ai_staff_no')
                     if data.get('ai_arrived_time'): ws_data['E5'] = data.get('ai_arrived_time')
                     if data.get('ai_departed_time'): ws_data['E6'] = data.get('ai_departed_time')
                     
-                    # 3. 車輛 1 ~ 4 儲存格精準映射 (Driver 1: E20/E21, Driver 2: E35/E36, Driver 3: E51/E52, Driver 4: E66/E67)
                     v_mappings = [
                         {"plate": "B12", "veh_class": "B13", "make": "B14", "color": "B15", "trans_no": "B16", "expiry": "B17", "seating": "B18", "damage": "B20", "name_en": "E12", "name_zh": "E13", "age": "E14", "addr_zh": "E15", "addr_en": "E16", "phone": "E17", "hkid": "E18", "lic_no": "E19", "dl_class": "E20", "dl_exp": "E21"},
                         {"plate": "B27", "veh_class": "B28", "make": "B29", "color": "B30", "trans_no": "B31", "expiry": "B32", "seating": "B33", "damage": "B35", "name_en": "E27", "name_zh": "E28", "age": "E29", "addr_zh": "E30", "addr_en": "E31", "phone": "E32", "hkid": "E33", "lic_no": "E34", "dl_class": "E35", "dl_exp": "E36"},
@@ -524,7 +533,6 @@ if st.button(button_label):
                         ws_data[m["addr_en"]] = v.get('address_en', '')
                         ws_data[m["phone"]] = v.get('phone', '')
                         
-                        # 身份證號碼：帶尾數括號；駕駛執照號碼：保持原樣不帶括號
                         hkid_val = format_hkid_parentheses(v.get('hkid', ''))
                         lic_val = v.get('driving_license_no', '')
                         
@@ -533,7 +541,6 @@ if st.button(button_label):
                         if v.get('dl_class'): ws_data[m["dl_class"]] = v.get('dl_class')
                         if v.get('dl_expiry_date'): ws_data[m["dl_exp"]] = v.get('dl_expiry_date')
 
-                    # 4. 傷者資料 100% 精準對齊 (含電話號碼與雙向翻譯地址)
                     if data.get('injured_total'): ws_data['B74'] = data.get('injured_total')
                     
                     injured_list = data.get('injured_list', [])
@@ -552,7 +559,7 @@ if st.button(button_label):
                         if inj.get('age'): ws_data[im["age"]] = inj.get('age')
                         ws_data[im["azh"]] = inj.get('address_zh', '')
                         ws_data[im["aen"]] = inj.get('address_en', '')
-                        ws_data[im["ph"]] = inj.get('phone', '')                # 傷者電話號碼
+                        ws_data[im["ph"]] = inj.get('phone', '')
                         ws_data[im["vno"]] = inj.get('vehicle_no', '')
                         ws_data[im["hosp"]] = inj.get('hospital', '')
                         ws_data[im["esc"]] = inj.get('escort', '')
@@ -560,28 +567,24 @@ if st.button(button_label):
                     if statement:
                         ws_police.cell(row=5, column=1, value=f"現場紀錄及司機口供：\n{statement}")
                     
-                    # 5. 精準將 car_diagram.png 車仔圖形分別根據獨立指定尺寸植入 P.1 (I41) 及 P.2 (H14, H39)
                     if os.path.exists("car_diagram.png"):
                         if 'P.1' in wb.sheetnames:
                             ws_p1 = wb['P.1']
                             img_p1 = OpenpyxlImage("car_diagram.png")
-                            img_p1.width = 414   # 10.95 公分
-                            img_p1.height = 347  # 9.17 公分
+                            img_p1.width = 414
+                            img_p1.height = 347
                             ws_p1.add_image(img_p1, 'I41')
                             
                         if 'P.2' in wb.sheetnames:
                             ws_p2 = wb['P.2']
-                            
-                            # P.2 車輛 2 (H14)
                             img_p2_1 = OpenpyxlImage("car_diagram.png")
-                            img_p2_1.width = 434   # 11.49 公分
-                            img_p2_1.height = 355  # 9.39 公分
+                            img_p2_1.width = 434
+                            img_p2_1.height = 355
                             ws_p2.add_image(img_p2_1, 'H14')
                             
-                            # P.2 車輛 3 (H39)
                             img_p2_2 = OpenpyxlImage("car_diagram.png")
-                            img_p2_2.width = 437   # 11.57 公分
-                            img_p2_2.height = 334  # 8.84 公分
+                            img_p2_2.width = 437
+                            img_p2_2.height = 334
                             ws_p2.add_image(img_p2_2, 'H39')
                     
                     wb.save(output_path)
@@ -589,7 +592,7 @@ if st.button(button_label):
                     
                     with open(output_path, "rb") as file:
                         st.download_button(
-                            label="📥 下載全功能 Excel 白皮書",
+                            label="📥 1. 下載 Excel 白皮書 (點擊後直接點手機『分享到 WhatsApp』)",
                             data=file,
                             file_name=output_path,
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -598,19 +601,17 @@ if st.button(button_label):
                         os.remove(output_path)
 
                 else:
-                    # 生成 TADO Word 附錄
                     doc_obj = generate_tado_word(data, statement)
                     if doc_obj is None:
-                        st.error("⚠️ 無法建立 Word 檔案！請確定 GitHub 的 requirements.txt 已加入 python-docx 套件，並且 Streamlit 已完成重新部署。")
+                        st.error("⚠️ 無法建立 Word 檔案！請確定 requirements.txt 已加入 python-docx。")
                     else:
                         output_word_path = f"TADO_附錄報告_{first_plate}.docx"
                         doc_obj.save(output_word_path)
-                        
                         st.success(f"🎉 TADO Word 附錄生成成功！(模型：{used_model_name})")
                         
                         with open(output_word_path, "rb") as file:
                             st.download_button(
-                                label="📥 下載 Word 附錄報告 (.docx)",
+                                label="📥 1. 下載 Word 附錄報告 (點擊後直接點手機『分享到 WhatsApp』)",
                                 data=file,
                                 file_name=output_word_path,
                                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -618,5 +619,13 @@ if st.button(button_label):
                         if os.path.exists(output_word_path):
                             os.remove(output_word_path)
                 
+                # 💬 2. WhatsApp 案件摘要分享按鈕
+                st.markdown(f'<a href="{wa_url}" target="_blank" class="wa-button">💬 2. 分享案件通報至 WhatsApp 群組</a>', unsafe_allow_html=True)
+                
+                st.divider()
+                # 🔄 3. 重置按鈕：重新開始處理下宗案件
+                if st.button("🔄 重新開始 / 處理下宗案件"):
+                    st.rerun()
+
             except Exception as e:
                 st.error(f"發生錯誤：{str(e)}")
