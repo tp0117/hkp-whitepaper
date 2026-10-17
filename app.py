@@ -8,6 +8,7 @@ import os
 import time
 import re
 import io
+import zipfile
 import urllib.parse
 from datetime import datetime
 from PIL import Image
@@ -20,18 +21,16 @@ try:
 except Exception:
     docx = None
 
-# 1. 網頁標題及頁面設定 (必須是第一個 Streamlit 指令)
+# 1. 網頁標題及頁面設定
 st.set_page_config(page_title="交通意外資料處理系統 (TAPI / TADO / T24)", page_icon="🚓", layout="wide")
 
 # 2. UI 手機化美化 (Custom CSS)
 st.markdown("""
     <style>
-    /* 隱藏 Streamlit 原生頂部選單、Header 及 Footer */
     #MainMenu {visibility: hidden;}
     header {visibility: hidden;}
     footer {visibility: hidden;}
     
-    /* 調整主容器邊距，更貼合手機螢幕 */
     .block-container {
         padding-top: 1rem;
         padding-bottom: 2rem;
@@ -39,7 +38,6 @@ st.markdown("""
         padding-right: 1rem;
     }
     
-    /* 放大生成與重置按鈕，適合手機大拇指點擊 */
     div.stButton > button:first-child {
         width: 100%;
         height: 3.2rem;
@@ -51,7 +49,6 @@ st.markdown("""
         box-shadow: 0 4px 6px rgba(0,0,0,0.1);
     }
     
-    /* WhatsApp 分享按鈕專用綠色樣式 */
     .wa-button {
         display: block;
         width: 100%;
@@ -69,7 +66,6 @@ st.markdown("""
         box-shadow: 0 4px 6px rgba(0,0,0,0.1);
     }
     
-    /* 修復深色模式 (Dark Mode) 下單選框文字變白看不清的問題 */
     div[role="radiogroup"] {
         padding: 10px;
         background-color: #f0f2f6;
@@ -82,7 +78,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Session State 狀態初始化 (解決點擊下載後畫面刷新導致按鈕消失的問題)
+# Session State 狀態初始化
 state_keys = {
     "generated": False,
     "current_mode": "",
@@ -93,6 +89,8 @@ state_keys = {
     "tado_filename": "",
     "t24_2_bytes": None,
     "t24_2_filename": "",
+    "zip_bytes": None,
+    "zip_filename": "",
     "wa_url": "",
     "preview_data": None
 }
@@ -100,7 +98,7 @@ for key, default_val in state_keys.items():
     if key not in st.session_state:
         st.session_state[key] = default_val
 
-# Helper 函數：僅用於身份證號碼尾數加上圓括號，如 G111759(8)
+# Helper 函數：身份證號碼尾數加上圓括號
 def format_hkid_parentheses(code_str):
     if not code_str:
         return ""
@@ -144,7 +142,7 @@ def parse_date_and_weekday(date_str):
 
     return s, s, "———"
 
-# Helper 函數：替換 Word 文件中的所有 Tag
+# Helper 函數：替換 Word 文件中的 Tag
 def replace_docx_tags(doc, context):
     def replace_in_p(p):
         full_text = p.text
@@ -162,7 +160,7 @@ def replace_docx_tags(doc, context):
                 for p in c.paragraphs:
                     replace_in_p(p)
 
-# 🔒 密碼鎖設定：優先從 Secrets 讀取 APP_PASSWORD，若未設定則預設為 "8888"
+# 🔒 密碼鎖設定
 APP_PASSWORD = st.secrets.get("APP_PASSWORD", "8888")
 
 if "authenticated" not in st.session_state:
@@ -182,7 +180,7 @@ if not st.session_state["authenticated"]:
             st.error("密碼錯誤，請重新輸入！")
     st.stop()
 
-# ----------------- 以下為驗證通過後的系統主介面 -----------------
+# ----------------- 系統主介面 -----------------
 
 st.title("🚓 交通意外資料處理系統 (TAPI / TADO / T24)")
 
@@ -197,15 +195,14 @@ default_api_key = st.secrets.get("GEMINI_API_KEY", "")
 
 with st.sidebar:
     st.header("⚙️ 系統設定")
-    api_key = st.text_input("Gemini API Key", value=default_api_key, type="password", help="系統已自動讀取雲端預設 Key，亦可手動覆蓋")
+    api_key = st.text_input("Gemini API Key", value=default_api_key, type="password")
     st.markdown("[按此免費獲取 Google Gemini API Key](https://aistudio.google.com/)")
     
     st.divider()
     selected_model = st.selectbox(
         "🤖 首選 AI 模型",
         ["gemini-3.8-flash", "gemini-1.5-flash", "gemini-2.5-pro"],
-        index=0,
-        help="若首選模型額度滿，系統將自動無縫嘗試其他可用模型"
+        index=0
     )
     
     st.divider()
@@ -213,7 +210,6 @@ with st.sidebar:
         st.session_state["authenticated"] = False
         st.rerun()
 
-# ----------------- 1. 選擇案件處理模式 -----------------
 st.subheader("📌 1. 請選擇案件類型與生成格式")
 app_mode = st.radio(
     "請選擇要處理的意外類型：",
@@ -227,43 +223,37 @@ app_mode = st.radio(
 
 st.divider()
 
-# ----------------- 2. 分區上載相片 -----------------
-st.subheader("📸 2. 分類上載相片 (支援行車證、駕照、手填紀錄單 IMSP-T3、現場照片)")
-
+st.subheader("📸 2. 分類上載相片")
 tab_main, tab_veh_a, tab_veh_b, tab_veh_c = st.tabs([
     "📋 手填紀錄單 (IMSP-T3) / 現場照片",
-    "🚗 車輛 甲 (Vehicle A) 相片",
-    "🚙 車輛 乙 (Vehicle B) 相片",
-    "🚚 其他 / 車輛 丙 (Vehicle C) 相片"
+    "🚗 車輛 甲 相片",
+    "🚙 車輛 乙 相片",
+    "🚚 其他 / 車輛 丙 相片"
 ])
 
 with tab_main:
     files_main = st.file_uploader("請上載【手填紀錄單 (IMSP-T3) / 現場照片 / 總表】", type=["jpg", "png", "jpeg"], accept_multiple_files=True, key="main_files")
 
 with tab_veh_a:
-    files_veh_a = st.file_uploader("請上載【車輛 甲 (Vehicle A)】的行車證及司機駕駛執照", type=["jpg", "png", "jpeg"], accept_multiple_files=True, key="veh_a_files")
+    files_veh_a = st.file_uploader("請上載【車輛 甲】行車證及駕照", type=["jpg", "png", "jpeg"], accept_multiple_files=True, key="veh_a_files")
 
 with tab_veh_b:
-    files_veh_b = st.file_uploader("請上載【車輛 乙 (Vehicle B)】的行車證及司機駕駛執照", type=["jpg", "png", "jpeg"], accept_multiple_files=True, key="veh_b_files")
+    files_veh_b = st.file_uploader("請上載【車輛 乙】行車證及駕照", type=["jpg", "png", "jpeg"], accept_multiple_files=True, key="veh_b_files")
 
 with tab_veh_c:
-    files_veh_c = st.file_uploader("請上載【車輛 丙 (Vehicle C) 或其他】相片", type=["jpg", "png", "jpeg"], accept_multiple_files=True, key="veh_c_files")
+    files_veh_c = st.file_uploader("請上載【車輛 丙 或其他】相片", type=["jpg", "png", "jpeg"], accept_multiple_files=True, key="veh_c_files")
 
 st.divider()
 
-# ----------------- 3. 補充口供 -----------------
 st.subheader("📝 3. 司機口供及補充文字 (可選填)")
-statement = st.text_area("請輸入額外口供、酒精測試結果或補充資料 (若相片已包含所有資料，此處可留空)", height=100)
+statement = st.text_area("請輸入額外口供、酒精測試結果或補充資料", height=100)
 
-# Helper: 生成 TADO Word 附錄檔
 def generate_tado_word(data, statement_text):
-    if not docx:
-        return None
+    if not docx: return None
     try:
         doc = docx.Document()
         h = doc.add_heading('交通意外 (TADO) 附錄報告', level=1)
-        if hasattr(WD_ALIGN_PARAGRAPH, 'CENTER'):
-            h.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        if hasattr(WD_ALIGN_PARAGRAPH, 'CENTER'): h.alignment = WD_ALIGN_PARAGRAPH.CENTER
         
         vehicles = data.get('vehicles', [])
         veh_labels = ["甲", "乙", "丙", "丁", "戊", "己"]
@@ -274,9 +264,8 @@ def generate_tado_word(data, statement_text):
             p = doc.add_paragraph()
             p.paragraph_format.line_spacing = 1.2
             
-            plate = v.get('plate_no', '———')
             p.add_run("1）車牌： ").bold = True
-            p.add_run(f"{plate}\n")
+            p.add_run(f"{v.get('plate_no', '———')}\n")
             
             v_class_en = v.get('vehicle_class_en', v.get('vehicle_class', '———'))
             v_class_zh = v.get('vehicle_class_zh', '———')
@@ -284,25 +273,16 @@ def generate_tado_word(data, statement_text):
             p.add_run("2）車輛類型： ").bold = True
             p.add_run(f"{v_type_str}\n")
             
-            weight = v.get('gross_weight', '———')
             p.add_run("3）總重量： ").bold = True
-            p.add_run(f"{weight}\n")
-            
-            make = v.get('make', '———')
+            p.add_run(f"{v.get('gross_weight', '———')}\n")
             p.add_run("4）廠名： ").bold = True
-            p.add_run(f"{make}\n")
-            
-            color = v.get('color', '———')
+            p.add_run(f"{v.get('make', '———')}\n")
             p.add_run("5）顏色： ").bold = True
-            p.add_run(f"{color}\n")
-            
-            trans_no = v.get('transaction_no', '———')
+            p.add_run(f"{v.get('color', '———')}\n")
             p.add_run("6）存檔編號： ").bold = True
-            p.add_run(f"{trans_no}\n")
-            
-            exp = v.get('expiry_date', '———')
+            p.add_run(f"{v.get('transaction_no', '———')}\n")
             p.add_run("7）屆滿日期： ").bold = True
-            p.add_run(f"{exp}\n")
+            p.add_run(f"{v.get('expiry_date', '———')}\n")
             
             d_en = v.get('driver_name_en', '')
             d_zh = v.get('driver_name_zh', '')
@@ -310,30 +290,19 @@ def generate_tado_word(data, statement_text):
             p.add_run("8）駕駛人： ").bold = True
             p.add_run(f"{driver_str}\n")
             
-            lic_no = v.get('driving_license_no', '———')
             p.add_run("9）駕駛執照號碼： ").bold = True
-            p.add_run(f"{lic_no}\n")
-            
-            addr_zh = v.get('address_zh', '———')
-            addr_en = v.get('address_en', '———')
+            p.add_run(f"{v.get('driving_license_no', '———')}\n")
             p.add_run("10）地址： ").bold = True
-            p.add_run(f"\n   中文：{addr_zh}\n   英文：{addr_en}\n")
-            
-            phone = v.get('phone', '———')
+            p.add_run(f"\n   中文：{v.get('address_zh', '———')}\n   英文：{v.get('address_en', '———')}\n")
             p.add_run("11）電話號碼： ").bold = True
-            p.add_run(f"{phone}\n")
-            
-            damage = v.get('damage', '———')
+            p.add_run(f"{v.get('phone', '———')}\n")
             p.add_run("12）車輛損毀情況： ").bold = True
-            p.add_run(f"{damage}\n")
+            p.add_run(f"{v.get('damage', '———')}\n")
             
             d_statement = v.get('driver_statement', statement_text if statement_text else '———')
             if d_statement and d_statement != '———':
                 s_clean = d_statement.strip()
-                if not (s_clean.startswith('「') and s_clean.endswith('」')):
-                    d_statement_formatted = f"「{s_clean}」"
-                else:
-                    d_statement_formatted = s_clean
+                d_statement_formatted = s_clean if (s_clean.startswith('「') and s_clean.endswith('」')) else f"「{s_clean}」"
             else:
                 d_statement_formatted = '———'
                 
@@ -343,27 +312,20 @@ def generate_tado_word(data, statement_text):
         doc.add_heading("警方資料及測試紀錄：", level=2)
         p_police = doc.add_paragraph()
         p_police.paragraph_format.line_spacing = 1.2
-        
-        police_veh = data.get('police_veh_no', '———')
-        police_officer = data.get('police_no', '———')
-        rn_no = data.get('rn_no', '———')
-        pbt = data.get('breathalyzer_test', '未有提供 / 無紀錄')
-        
         p_police.add_run("• 警車車牌： ").bold = True
-        p_police.add_run(f"{police_veh}\n")
+        p_police.add_run(f"{data.get('police_veh_no', '———')}\n")
         p_police.add_run("• 到場警員： ").bold = True
-        p_police.add_run(f"{police_officer}\n")
+        p_police.add_run(f"{data.get('police_no', '———')}\n")
         p_police.add_run("• 報案號碼 (RN)： ").bold = True
-        p_police.add_run(f"{rn_no}\n")
+        p_police.add_run(f"{data.get('rn_no', '———')}\n")
         p_police.add_run("• 酒精呼氣測試 (PBT)： ").bold = True
-        p_police.add_run(f"{pbt}\n")
+        p_police.add_run(f"{data.get('breathalyzer_test', '未有提供 / 無紀錄')}\n")
 
         return doc
     except Exception as err:
         st.error(f"建立 Word 文件時發生錯誤：{str(err)}")
         return None
 
-# 動態生成按鈕標題
 if "TAPI" in app_mode:
     button_label = "🚀 一鍵生成【Excel 白皮書 + Word 附錄】"
 elif "TADO" in app_mode:
@@ -383,16 +345,16 @@ if st.button(button_label, type="primary"):
         return imgs
 
     images_with_tags.extend(process_files(files_main, "手填紀錄單 (IMSP-T3)"))
-    images_with_tags.extend(process_files(files_veh_a, "車輛 甲 (Vehicle A)"))
-    images_with_tags.extend(process_files(files_veh_b, "車輛 乙 (Vehicle B)"))
-    images_with_tags.extend(process_files(files_veh_c, "車輛 丙 (Vehicle C)"))
+    images_with_tags.extend(process_files(files_veh_a, "車輛 甲"))
+    images_with_tags.extend(process_files(files_veh_b, "車輛 乙"))
+    images_with_tags.extend(process_files(files_veh_c, "車輛 丙"))
 
     if not api_key:
         st.error("請先輸入或設定 Gemini API Key！")
     elif not images_with_tags and not statement:
         st.error("請最少上載一張相片或輸入文字資料！")
     else:
-        with st.spinner('AI 正在全方位辨識（包含對齊 IMSP-T3 頂部車輛類別與傷者資訊）...'):
+        with st.spinner('AI 正在全方位辨識並生成報告...'):
             try:
                 client = genai.Client(api_key=api_key.strip())
                 raw_images = [item[0] for item in images_with_tags]
@@ -400,7 +362,7 @@ if st.button(button_label, type="primary"):
                 
                 prompt = f"""
                 你是一個專業的香港交通意外資料提取助手。
-                請仔細分析所有上載的相片（特別是東隧事故處理程序 IMSP-T3 手填紙本紀錄、行車證、駕駛執照、現場照片）以及現場文字內容：
+                請仔細分析所有上載相片與現場文字內容：
                 
                 【相片來源分類】：
                 {photo_notes}
@@ -408,107 +370,69 @@ if st.button(button_label, type="primary"):
                 【補充文字內容與口供】：
                 {statement}
                 
-                【📋 手填紀錄單 IMSP-T3 頂部與表格欄位精準提取加強對應】：
-                1. 頂部「事故發生時間」：提取意外時間 (ta_time，如 1542)。
-                2. 頂部「車輛：」欄位 (如 "P/C 8161 / M/C WW 5031")：
-                   - P/C 代表 PRIVATE CAR (私家車)
-                   - M/C 代表 MOTORCYCLE (電單車)
-                   - L/G/V 或 LGV 代表 LIGHT GOODS VEHICLE (輕型貨車)
-                   - H/G/V 代表 HEAVY GOODS VEHICLE (重型貨車)
-                   - 請將提取出的車牌與車輛類型對應補入 vehicles 陣列的 plate_no, vehicle_class_en, vehicle_class_zh！
-                3. 頂部「受傷人數：」及上方手寫註記 (如 "M/C WW5031 司機" 或 "P/C 8161 乘客")：
-                   - injured_total: 受傷人數 (如 1)
-                   - 請解析手寫文字中的涉及車牌 (如 WW5031) 與受傷者身份，寫入 injured_list 傷者資料 (vehicle_no, escort/notes)！
-                4. 表格項目 1「東隧職員發現/到達現場時間」: tunnel_staff_arrived
-                5. 表格項目 8「警方到達時間」: police_arrived_time
-                6. 表格項目 8「警員編號」: police_no (普通軍裝警員編號，如 19626)
-                7. 表格項目 8 或 11「車牌」: police_veh_no (警車車牌，如 AM8049 / AM2795)
-                8. 表格項目 11「警方 AI 到達時間」: ai_arrived_time
-                9. 表格項目 11「警方 AI 警員編號」: ai_staff_no (如 PC14367)
-                10. 表格項目 11「警方 AI 離開時間」: ai_departed_time
-                11. 表格項目 12「警方檔案編號」: rn_no (如 RN=13913)
-                12. 表格項目 19「所有肇事車輛及政府人員離開」: tunnel_staff_departed (如 1648)
+                【📋 手填紀錄單 IMSP-T3 精準提取】：
+                1. 意外時間 (ta_time，如 1542)
+                2. vehicles 陣列：plate_no, vehicle_class_en, vehicle_class_zh
+                3. injured_total 受傷人數與 injured_list 傷者資料
+                4. tunnel_staff_arrived, police_arrived_time, police_no, police_veh_no, ai_staff_no, ai_arrived_time, ai_departed_time, rn_no, tunnel_staff_departed
                 
-                【🚘 車牌號碼強制要求】：
-                - plate_no：必須完整提取並包含車牌的尾數字母/數字 (例如 UG8125 R, WA1062 Q, WW5031, AM8049)。絕對不可以省略尾數！
-                
-                【🌐 地址雙向翻譯強制要求 (100% 必須完成)】：
-                1. 司機及傷者的住址：相片中不論提供的是中文住址還是英文住址，你必須同時生成：
-                   - address_zh：完整繁體中文住址 (若原本是英文，必須精準翻譯成繁體中文)。
-                   - address_en：完整英文住址 (若原本是中文，必須精準翻譯成英文)。
-                2. 絕對不可留空或填寫 N/A！兩者必須同時填滿。
-                
-                【🆔 證件號碼與期滿日期要求】：
-                1. 身份證號碼 (hkid)：最後一個校驗碼數字或字母必須使用圓括號 ( ) 括住，例如 G111759(8) 或 Y463269(7)。
-                2. 駕駛執照號碼 (driving_license_no)：請照實提取，尾數【絕對不要添加括號】(例如 Y463269 7)。
-                3. dl_expiry_date (駕駛執照期滿日期)：駕駛執照上的有效期/屆滿日期 (如 DD/MM/YYYY 或 DD-MM-YYYY)。
-                
-                【受傷者 (Injured) 詳細資料與電話號碼提取】：
-                1. injured_total: 受傷者合共人數 (無人受傷填 "0")。
-                2. injured_list: 傷者列表陣列 (最多 4 人)，必須完整提取：
-                   - name_en: 傷者英文姓名
-                   - name_zh: 傷者中文姓名
-                   - age: 年齡
-                   - address_zh: 完整中文住址 (需雙向翻譯)
-                   - address_en: 完整英文住址 (需雙向翻譯)
-                   - phone: 傷者電話號碼 (必須照實提取，不可遺漏)
-                   - vehicle_no: 涉及車牌號碼 (從 IMSP-T3 頂部標記如 WW5031 提取)
-                   - hospital: 送往醫院
-                   - escort: 身份備註 (如 M/C WW5031 司機)
+                【🚘 車牌號碼】：完整提取含尾數！
+                【🌐 地址】：同時提供繁體中文 address_zh 與英文 address_en！
+                【🆔 證件】：hkid 尾數帶括號如 G111759(8)；driving_license_no 無括號！
                 
                 請嚴格以 JSON 格式輸出：
                 {{
-                    "log_no": "Log No 紀錄號碼",
-                    "rn_no": "HKP RN 報案號碼/案號 (如 RN:13913)",
+                    "log_no": "紀錄號碼",
+                    "rn_no": "RN報案號碼",
                     "ta_date": "意外日期",
-                    "ta_time": "意外時間 (如 1542)",
+                    "ta_time": "意外時間",
                     "location": "意外地點",
-                    "tunnel_staff_arrived": "隧道職員到達時間 (如 1542)",
-                    "tunnel_staff_departed": "隧道職員離開時間 (如 1648)",
-                    "police_arrived_time": "警察到達時間 (如 1604)",
-                    "police_no": "普通警員編號 (如 19626)",
-                    "ai_staff_no": "交通意外調查組人員編號 (如 PC14367)",
-                    "ai_arrived_time": "HKP AI 到達時間 (如 1616)",
-                    "ai_departed_time": "HKP AI 離開時間 (如 1640)",
-                    "police_veh_no": "警車車牌 (如 AM8049)",
-                    "breathalyzer_test": "酒精呼氣測試紀錄",
+                    "tunnel_staff_arrived": "到達時間",
+                    "tunnel_staff_departed": "離開時間",
+                    "police_arrived_time": "警察到達時間",
+                    "police_no": "警員編號",
+                    "ai_staff_no": "AI警員編號",
+                    "ai_arrived_time": "AI到達時間",
+                    "ai_departed_time": "AI離開時間",
+                    "police_veh_no": "警車車牌",
+                    "breathalyzer_test": "PBT紀錄",
                     "vehicles": [
                         {{
-                            "plate_no": "車牌號碼 (必須含尾數，如 WW5031 或 8161)",
-                            "vehicle_class_en": "英文車輛類別 (如 MOTORCYCLE)",
-                            "vehicle_class_zh": "中文車輛類別 (如 電單車)",
-                            "gross_weight": "總重量",
-                            "make": "車輛廠名 (如 TOYOTA)",
-                            "color": "車輛顏色",
-                            "transaction_no": "存檔編號",
-                            "expiry_date": "屆滿日期 (無則 ———)",
+                            "plate_no": "車牌號碼",
+                            "vehicle_class_en": "英文車類",
+                            "vehicle_class_zh": "中文車類",
+                            "gross_weight": "總重",
+                            "make": "廠名",
+                            "color": "顏色",
+                            "transaction_no": "存檔號",
+                            "expiry_date": "屆滿日",
                             "seating_capacity": "載客額",
-                            "damage": "車輛損毀情況",
-                            "driver_name_en": "司機英文姓名",
-                            "driver_name_zh": "司機中文姓名",
+                            "damage": "損毀情況",
+                            "driver_name_en": "司機英文名",
+                            "driver_name_zh": "司機中文名",
                             "age": "年齡",
-                            "phone": "電話號碼",
-                            "hkid": "身份證號碼 (尾數帶括號，如 G111759(8))",
-                            "driving_license_no": "駕駛執照號碼 (無括號，如 Y463269 7)",
-                            "dl_class": "駕照 Full Class (如 1, 2, 3)",
-                            "dl_expiry_date": "駕駛執照期滿日期 (如 DD/MM/YYYY)",
-                            "address_zh": "完整中文住址",
-                            "address_en": "完整英文住址",
+                            "phone": "電話",
+                            "hkid": "身份證",
+                            "driving_license_no": "駕照號碼",
+                            "dl_class": "駕照類別",
+                            "dl_expiry_date": "駕照屆滿日",
+                            "address_zh": "中文地址",
+                            "address_en": "英文地址",
                             "driver_statement": "司機口供"
                         }}
                     ],
-                    "injured_total": "受傷者合共人數 (如 1)",
+                    "injured_total": "受傷人數",
                     "injured_list": [
                         {{
-                            "name_en": "傷者英文名",
-                            "name_zh": "傷者中文名",
+                            "name_en": "英文名",
+                            "name_zh": "中文名",
                             "age": "年齡",
-                            "address_zh": "中文住址",
-                            "address_en": "英文住址",
-                            "phone": "電話號碼",
-                            "vehicle_no": "涉及車牌號碼 (如 WW5031)",
-                            "hospital": "送往醫院",
-                            "escort": "身份備註 (如 M/C WW5031 司機)"
+                            "address_zh": "中文地址",
+                            "address_en": "英文地址",
+                            "phone": "電話",
+                            "vehicle_no": "車牌",
+                            "hospital": "醫院",
+                            "escort": "備註"
                         }}
                     ]
                 }}
@@ -544,7 +468,7 @@ if st.button(button_label, type="primary"):
                 
                 date_std, date_zh, weekday_zh = parse_date_and_weekday(data.get('ta_date', ''))
 
-                # ----------------- 1. 無論什麼模式，一律背景同步生成 TADO Word 附錄 -----------------
+                # 1. 生成 TADO Word 附錄 Bytes
                 tado_bytes = None
                 tado_filename = f"TADO_附錄報告_{first_plate}.docx"
                 doc_tado = generate_tado_word(data, statement)
@@ -553,7 +477,7 @@ if st.button(button_label, type="primary"):
                     doc_tado.save(tado_io)
                     tado_bytes = tado_io.getvalue()
 
-                # ----------------- 2. 根據選擇模式生成主報告 -----------------
+                # 2. 生成 主報告 Bytes
                 main_bytes = None
                 main_filename = ""
                 main_mime = ""
@@ -572,7 +496,6 @@ if st.button(button_label, type="primary"):
                     if data.get('location'): ws_data['B5'] = data.get('location')
                     if data.get('tunnel_staff_arrived'): ws_data['B6'] = data.get('tunnel_staff_arrived')
                     if data.get('tunnel_staff_departed'): ws_data['B7'] = data.get('tunnel_staff_departed')
-                    
                     if data.get('police_arrived_time'): ws_data['E2'] = data.get('police_arrived_time')
                     if data.get('police_no'): ws_data['E3'] = data.get('police_no')
                     if data.get('ai_staff_no'): ws_data['E4'] = data.get('ai_staff_no')
@@ -585,7 +508,6 @@ if st.button(button_label, type="primary"):
                         {"plate": "B43", "veh_class": "B44", "make": "B45", "color": "B46", "trans_no": "B47", "expiry": "B48", "seating": "B49", "damage": "B51", "name_en": "E43", "name_zh": "E44", "age": "E45", "addr_zh": "E46", "addr_en": "E47", "phone": "E48", "hkid": "E49", "lic_no": "E50", "dl_class": "E51", "dl_exp": "E52"},
                         {"plate": "B58", "veh_class": "B59", "make": "B60", "color": "B61", "trans_no": "B62", "expiry": "B63", "seating": "B64", "damage": "B66", "name_en": "E58", "name_zh": "E59", "age": "E60", "addr_zh": "E61", "addr_en": "E62", "phone": "E63", "hkid": "E64", "lic_no": "E65", "dl_class": "E66", "dl_exp": "E67"}
                     ]
-                    
                     for idx, v in enumerate(vehicles_list):
                         if idx >= len(v_mappings): break
                         m = v_mappings[idx]
@@ -597,24 +519,20 @@ if st.button(button_label, type="primary"):
                         if v.get('expiry_date'): ws_data[m["expiry"]] = v.get('expiry_date')
                         if v.get('seating_capacity'): ws_data[m["seating"]] = v.get('seating_capacity')
                         ws_data[m["damage"]] = v.get('damage', '')
-                        
                         ws_data[m["name_en"]] = v.get('driver_name_en', '')
                         ws_data[m["name_zh"]] = v.get('driver_name_zh', '')
                         if v.get('age'): ws_data[m["age"]] = v.get('age')
                         ws_data[m["addr_zh"]] = v.get('address_zh', '')
                         ws_data[m["addr_en"]] = v.get('address_en', '')
                         ws_data[m["phone"]] = v.get('phone', '')
-                        
                         hkid_val = format_hkid_parentheses(v.get('hkid', ''))
                         lic_val = v.get('driving_license_no', '')
-                        
                         if hkid_val: ws_data[m["hkid"]] = hkid_val
                         if lic_val: ws_data[m["lic_no"]] = lic_val
                         if v.get('dl_class'): ws_data[m["dl_class"]] = v.get('dl_class')
                         if v.get('dl_expiry_date'): ws_data[m["dl_exp"]] = v.get('dl_expiry_date')
 
                     if data.get('injured_total'): ws_data['B74'] = data.get('injured_total')
-                    
                     injured_list = data.get('injured_list', [])
                     i_mappings = [
                         {"en": "B77", "zh": "B78", "age": "B79", "azh": "B80", "aen": "B81", "ph": "B82", "vno": "B83", "hosp": "B84", "esc": "B85"},
@@ -622,7 +540,6 @@ if st.button(button_label, type="primary"):
                         {"en": "B89", "zh": "B90", "age": "B91", "azh": "B92", "aen": "B93", "ph": "B94", "vno": "B95", "hosp": "B96", "esc": "B97"},
                         {"en": "E89", "zh": "E90", "age": "E91", "azh": "E92", "aen": "E93", "ph": "E94", "vno": "E95", "hosp": "E96", "esc": "E97"}
                     ]
-                    
                     for idx, inj in enumerate(injured_list):
                         if idx >= len(i_mappings): break
                         im = i_mappings[idx]
@@ -717,7 +634,19 @@ if st.button(button_label, type="primary"):
                         t24_2_bytes = out_io2.getvalue()
                         t24_2_filename = f"T24_正式報告_(續頁)_{first_plate}.docx"
 
-                # ----------------- 3. 儲存至 Session State 以保證畫面按鈕持久化 -----------------
+                # 3. 建立一鍵 ZIP 打包檔 (專為手機用戶設計)
+                zip_io = io.BytesIO()
+                with zipfile.ZipFile(zip_io, 'w', zipfile.ZIP_DEFLATED) as zf:
+                    if main_bytes:
+                        zf.writestr(main_filename, main_bytes)
+                    if tado_bytes and "TADO" not in app_mode:
+                        zf.writestr(tado_filename, tado_bytes)
+                    if t24_2_bytes:
+                        zf.writestr(t24_2_filename, t24_2_bytes)
+                
+                zip_bytes = zip_io.getvalue()
+                zip_filename = f"交通意外報告打包_{first_plate}.zip"
+
                 wa_text = f"🚓【交通意外報告已生成】\n• RN編號：{data.get('rn_no', '無')}\n• 意外時間：{data.get('ta_time', '無')}\n• 涉及車牌：{first_plate}\n• 模式：{app_mode.split(' ')[0]}\n請在附件接收報告檔。"
                 
                 st.session_state["current_mode"] = app_mode
@@ -728,6 +657,8 @@ if st.button(button_label, type="primary"):
                 st.session_state["tado_filename"] = tado_filename
                 st.session_state["t24_2_bytes"] = t24_2_bytes
                 st.session_state["t24_2_filename"] = t24_2_filename
+                st.session_state["zip_bytes"] = zip_bytes
+                st.session_state["zip_filename"] = zip_filename
                 st.session_state["wa_url"] = f"https://api.whatsapp.com/send?text={urllib.parse.quote(wa_text)}"
                 st.session_state["preview_data"] = data
                 st.session_state["generated"] = True
@@ -737,21 +668,32 @@ if st.button(button_label, type="primary"):
             except Exception as e:
                 st.error(f"發生錯誤：{str(e)}")
 
-# ----------------- 4. 持久化雙下載按鈕區 -----------------
+# ----------------- 4. 下載區 -----------------
 if st.session_state.get("generated"):
     st.subheader("📊 AI 自動提取與精準對齊預覽：")
     st.json(st.session_state["preview_data"])
     
-    st.success("🎉 報告生成成功！請於下方按鈕下載（點擊其中一個下載後，頁面按鈕會保持，可繼續點擊下載另一個）：")
+    st.success("🎉 報告生成成功！手機用戶建議點擊【📦 一鍵打包下載】，一次過將所有報告存入手機：")
     
     cur_mode = st.session_state.get("current_mode", "")
     
-    # 若為 TAPI 或 T24 模式：顯示「主報告 + Word 附錄」雙按鈕
+    # 🌟 iPhone 手機救星：一鍵 ZIP 打包下載按鈕
+    if st.session_state.get("zip_bytes") and ("TAPI" in cur_mode or "T24" in cur_mode):
+        st.download_button(
+            label=f"📦 1. 一鍵打包下載所有報告 (.zip 檔 - 專為手機免跳頁設計)",
+            data=st.session_state["zip_bytes"],
+            file_name=st.session_state["zip_filename"],
+            mime="application/zip",
+            key="dl_zip_btn"
+        )
+        st.write("---")
+
+    # 個別下載按鈕區
     if "TAPI" in cur_mode or "T24" in cur_mode:
         col_dl1, col_dl2 = st.columns(2)
         with col_dl1:
             st.download_button(
-                label=f"📥 1. 下載主要報告 ({st.session_state['main_filename']})",
+                label=f"📥 2a. 下載主要報告 ({st.session_state['main_filename']})",
                 data=st.session_state["main_bytes"],
                 file_name=st.session_state["main_filename"],
                 mime=st.session_state["main_mime"],
@@ -760,7 +702,7 @@ if st.session_state.get("generated"):
         with col_dl2:
             if st.session_state["tado_bytes"]:
                 st.download_button(
-                    label=f"📄 2. 下載 Word 附錄報告 ({st.session_state['tado_filename']})",
+                    label=f"📄 2b. 下載 Word 附錄報告 ({st.session_state['tado_filename']})",
                     data=st.session_state["tado_bytes"],
                     file_name=st.session_state["tado_filename"],
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -769,14 +711,13 @@ if st.session_state.get("generated"):
 
         if st.session_state.get("t24_2_bytes"):
             st.download_button(
-                label=f"📥 1b. 下載 T24 正式報告續頁 ({st.session_state['t24_2_filename']})",
+                label=f"📥 下載 T24 正式報告續頁 ({st.session_state['t24_2_filename']})",
                 data=st.session_state["t24_2_bytes"],
                 file_name=st.session_state["t24_2_filename"],
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 key="dl_t24_2_btn"
             )
 
-    # 若為 TADO 模式：單獨顯示 Word 附錄
     else:
         if st.session_state["tado_bytes"]:
             st.download_button(
