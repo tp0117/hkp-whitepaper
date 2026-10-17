@@ -577,7 +577,7 @@ if st.button(button_label, type="primary"):
                             v_obj = vehicles_list[idx_num]
                             item['veh_class_zh'] = v_obj.get('vehicle_class_zh', v_obj.get('vehicle_class_en', '車輛'))
                             item['plate_no'] = v_obj.get('plate_no', '')
-                            item['damage'] = v_obj.get('damage', '車身毀爛')
+                            item['damage'] = v_obj.get('damage', '車身毀欄')
 
                 # 1. 生成 T17A Bytes
                 t17_bytes = None
@@ -711,28 +711,28 @@ if st.button(button_label, type="primary"):
                             s_clean = d_statement.strip() if d_statement and d_statement != '———' else '———'
                             d_statement_formatted = s_clean if (s_clean.startswith('「') and s_clean.endswith('」')) else (f"「{s_clean}」" if s_clean != '———' else '———')
 
-                            context[f"{{{{VEH_{i}_PLATE}}}}"] = v.get('plate_no', '———')
-                            context[f"{{{{VEH_{i}_CLASS_ZH}}}}"] = v.get('vehicle_class_zh', v.get('vehicle_class_en', '———'))
-                            context[f"{{{{VEH_{i}_CLASS_EN}}}}"] = v.get('vehicle_class_en', '———')
-                            context[f"{{{{VEH_{i}_WEIGHT}}}}"] = v.get('gross_weight', '———')
-                            context[f"{{{{VEH_{i}_MAKE}}}}"] = v.get('make', '———')
-                            context[f"{{{{VEH_{i}_COLOR}}}}"] = v.get('color', '———')
-                            context[f"{{{{VEH_{i}_TRANS_NO}}}}"] = v.get('transaction_no', '———')
-                            context[f"{{{{VEH_{i}_EXPIRY}}}}"] = v.get('expiry_date', '———')
-                            context[f"{{{{VEH_{i}_DAMAGE}}}}"] = v.get('damage', '———')
-                            context[f"{{{{DRV_{i}_NAME_ZH}}}}"] = v.get('driver_name_zh', '———')
-                            context[f"{{{{DRV_{i}_NAME_EN}}}}"] = v.get('driver_name_en', '———')
-                            context[f"{{{{DRV_{i}_HKID}}}}"] = format_hkid_parentheses(v.get('hkid', '———'))
-                            context[f"{{{{DRV_{i}_LIC}}}}"] = v.get('driving_license_no', '———')
-                            context[f"{{{{DRV_{i}_ADDR_ZH}}}}"] = v.get('address_zh', '———')
-                            context[f"{{{{DRV_{i}_ADDR_EN}}}}"] = v.get('address_en', '———')
-                            context[f"{{{{DRV_{i}_PHONE}}}}"] = v.get('phone', '———')
-                            context[f"{{{{DRV_{i}_STATEMENT}}}}"] = d_statement_formatted
+                            context["{{" + f"VEH_{i}_PLATE" + "}}"] = v.get('plate_no', '———')
+                            context["{{" + f"VEH_{i}_CLASS_ZH" + "}}"] = v.get('vehicle_class_zh', v.get('vehicle_class_en', '———'))
+                            context["{{" + f"VEH_{i}_CLASS_EN" + "}}"] = v.get('vehicle_class_en', '———')
+                            context["{{" + f"VEH_{i}_WEIGHT" + "}}"] = v.get('gross_weight', '———')
+                            context["{{" + f"VEH_{i}_MAKE" + "}}"] = v.get('make', '———')
+                            context["{{" + f"VEH_{i}_COLOR" + "}}"] = v.get('color', '———')
+                            context["{{" + f"VEH_{i}_TRANS_NO" + "}}"] = v.get('transaction_no', '———')
+                            context["{{" + f"VEH_{i}_EXPIRY" + "}}"] = v.get('expiry_date', '———')
+                            context["{{" + f"VEH_{i}_DAMAGE" + "}}"] = v.get('damage', '———')
+                            context["{{" + f"DRV_{i}_NAME_ZH" + "}}"] = v.get('driver_name_zh', '———')
+                            context["{{" + f"DRV_{i}_NAME_EN" + "}}"] = v.get('driver_name_en', '———')
+                            context["{{" + f"DRV_{i}_HKID" + "}}"] = format_hkid_parentheses(v.get('hkid', '———'))
+                            context["{{" + f"DRV_{i}_LIC" + "}}"] = v.get('driving_license_no', '———')
+                            context["{{" + f"DRV_{i}_ADDR_ZH" + "}}"] = v.get('address_zh', '———')
+                            context["{{" + f"DRV_{i}_ADDR_EN" + "}}"] = v.get('address_en', '———')
+                            context["{{" + f"DRV_{i}_PHONE" + "}}"] = v.get('phone', '———')
+                            context["{{" + f"DRV_{i}_STATEMENT" + "}}"] = d_statement_formatted
                         else:
                             for key_suffix in ["PLATE", "CLASS_ZH", "CLASS_EN", "WEIGHT", "MAKE", "COLOR", "TRANS_NO", "EXPIRY", "DAMAGE"]:
-                                context[f"{{{{VEH_{i}_{key_suffix}}}}"] = "———"
+                                context["{{" + f"VEH_{i}_{key_suffix}" + "}}"] = "———"
                             for key_suffix in ["NAME_ZH", "NAME_EN", "HKID", "LIC", "ADDR_ZH", "ADDR_EN", "PHONE", "STATEMENT"]:
-                                context[f"{{{{DRV_{i}_{key_suffix}}}}"] = "———"
+                                context["{{" + f"DRV_{i}_{key_suffix}" + "}}"] = "———"
 
                     doc1 = docx.Document("T24_template_1.docx")
                     replace_docx_tags(doc1, context)
