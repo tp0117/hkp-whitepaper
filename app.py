@@ -7,6 +7,7 @@ import json
 import os
 import time
 import re
+import io
 import urllib.parse
 from datetime import datetime
 from PIL import Image
@@ -81,6 +82,24 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+# Session State 狀態初始化 (解決點擊下載後畫面刷新導致按鈕消失的問題)
+state_keys = {
+    "generated": False,
+    "current_mode": "",
+    "main_bytes": None,
+    "main_filename": "",
+    "main_mime": "",
+    "tado_bytes": None,
+    "tado_filename": "",
+    "t24_2_bytes": None,
+    "t24_2_filename": "",
+    "wa_url": "",
+    "preview_data": None
+}
+for key, default_val in state_keys.items():
+    if key not in st.session_state:
+        st.session_state[key] = default_val
+
 # Helper 函數：僅用於身份證號碼尾數加上圓括號，如 G111759(8)
 def format_hkid_parentheses(code_str):
     if not code_str:
@@ -101,7 +120,6 @@ def parse_date_and_weekday(date_str):
     s = str(date_str).strip()
     dt = None
     
-    # 嘗試多種常見日期格式
     for fmt in ["%d/%m/%Y", "%Y-%m-%d", "%Y/%m/%d", "%d-%m-%Y", "%Y.%m.%d"]:
         try:
             dt = datetime.strptime(s, fmt)
@@ -116,7 +134,6 @@ def parse_date_and_weekday(date_str):
         date_std = dt.strftime("%d/%m/%Y")
         return date_std, date_zh, weekday_zh
     
-    # 若 AI 傳入原本就是中文日期
     match_zh = re.search(r'(\d{4})年(\d{1,2})月(\d{1,2})日', s)
     if match_zh:
         y, m, d = int(match_zh.group(1)), int(match_zh.group(2)), int(match_zh.group(3))
@@ -148,11 +165,9 @@ def replace_docx_tags(doc, context):
 # 🔒 密碼鎖設定：優先從 Secrets 讀取 APP_PASSWORD，若未設定則預設為 "8888"
 APP_PASSWORD = st.secrets.get("APP_PASSWORD", "8888")
 
-# 初始化登入狀態
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
 
-# 若未通過驗證，顯示密碼輸入畫面
 if not st.session_state["authenticated"]:
     st.title("🔒 白皮書 / TADO / T24 系統 - 安全驗證")
     st.info("本系統僅供內部授權人員使用，請輸入訪問密碼。")
@@ -165,30 +180,27 @@ if not st.session_state["authenticated"]:
             st.rerun()
         else:
             st.error("密碼錯誤，請重新輸入！")
-    
     st.stop()
 
 # ----------------- 以下為驗證通過後的系統主介面 -----------------
 
 st.title("🚓 交通意外資料處理系統 (TAPI / TADO / T24)")
 
-# 頂部控制欄：提供重置按鈕
 top_col1, top_col2 = st.columns([3, 1])
 with top_col2:
     if st.button("🔄 重置頁面"):
+        for k in state_keys:
+            st.session_state[k] = state_keys[k]
         st.rerun()
 
-# 優先從 Secrets 讀取 Gemini API Key
 default_api_key = st.secrets.get("GEMINI_API_KEY", "")
 
-# 左側欄設定
 with st.sidebar:
     st.header("⚙️ 系統設定")
     api_key = st.text_input("Gemini API Key", value=default_api_key, type="password", help="系統已自動讀取雲端預設 Key，亦可手動覆蓋")
     st.markdown("[按此免費獲取 Google Gemini API Key](https://aistudio.google.com/)")
     
     st.divider()
-    
     selected_model = st.selectbox(
         "🤖 首選 AI 模型",
         ["gemini-3.8-flash", "gemini-1.5-flash", "gemini-2.5-pro"],
@@ -263,56 +275,56 @@ def generate_tado_word(data, statement_text):
             p.paragraph_format.line_spacing = 1.2
             
             plate = v.get('plate_no', '———')
-            p.add_run(f"1）車牌： ").bold = True
+            p.add_run("1）車牌： ").bold = True
             p.add_run(f"{plate}\n")
             
             v_class_en = v.get('vehicle_class_en', v.get('vehicle_class', '———'))
             v_class_zh = v.get('vehicle_class_zh', '———')
             v_type_str = f"{v_class_en} / {v_class_zh}" if v_class_zh != '———' else v_class_en
-            p.add_run(f"2）車輛類型： ").bold = True
+            p.add_run("2）車輛類型： ").bold = True
             p.add_run(f"{v_type_str}\n")
             
             weight = v.get('gross_weight', '———')
-            p.add_run(f"3）總重量： ").bold = True
+            p.add_run("3）總重量： ").bold = True
             p.add_run(f"{weight}\n")
             
             make = v.get('make', '———')
-            p.add_run(f"4）廠名： ").bold = True
+            p.add_run("4）廠名： ").bold = True
             p.add_run(f"{make}\n")
             
             color = v.get('color', '———')
-            p.add_run(f"5）顏色： ").bold = True
+            p.add_run("5）顏色： ").bold = True
             p.add_run(f"{color}\n")
             
             trans_no = v.get('transaction_no', '———')
-            p.add_run(f"6）存檔編號： ").bold = True
+            p.add_run("6）存檔編號： ").bold = True
             p.add_run(f"{trans_no}\n")
             
             exp = v.get('expiry_date', '———')
-            p.add_run(f"7）屆滿日期： ").bold = True
+            p.add_run("7）屆滿日期： ").bold = True
             p.add_run(f"{exp}\n")
             
             d_en = v.get('driver_name_en', '')
             d_zh = v.get('driver_name_zh', '')
             driver_str = f"{d_en} ({d_zh})" if d_zh else (d_en if d_en else '———')
-            p.add_run(f"8）駕駛人： ").bold = True
+            p.add_run("8）駕駛人： ").bold = True
             p.add_run(f"{driver_str}\n")
             
             lic_no = v.get('driving_license_no', '———')
-            p.add_run(f"9）駕駛執照號碼： ").bold = True
+            p.add_run("9）駕駛執照號碼： ").bold = True
             p.add_run(f"{lic_no}\n")
             
             addr_zh = v.get('address_zh', '———')
             addr_en = v.get('address_en', '———')
-            p.add_run(f"10）地址： ").bold = True
+            p.add_run("10）地址： ").bold = True
             p.add_run(f"\n   中文：{addr_zh}\n   英文：{addr_en}\n")
             
             phone = v.get('phone', '———')
-            p.add_run(f"11）電話號碼： ").bold = True
+            p.add_run("11）電話號碼： ").bold = True
             p.add_run(f"{phone}\n")
             
             damage = v.get('damage', '———')
-            p.add_run(f"12）車輛損毀情況： ").bold = True
+            p.add_run("12）車輛損毀情況： ").bold = True
             p.add_run(f"{damage}\n")
             
             d_statement = v.get('driver_statement', statement_text if statement_text else '———')
@@ -325,7 +337,7 @@ def generate_tado_word(data, statement_text):
             else:
                 d_statement_formatted = '———'
                 
-            p.add_run(f"13）司機口供： ").bold = True
+            p.add_run("13）司機口供： ").bold = True
             p.add_run(f"{d_statement_formatted}\n")
 
         doc.add_heading("警方資料及測試紀錄：", level=2)
@@ -337,13 +349,13 @@ def generate_tado_word(data, statement_text):
         rn_no = data.get('rn_no', '———')
         pbt = data.get('breathalyzer_test', '未有提供 / 無紀錄')
         
-        p_police.add_run(f"• 警車車牌： ").bold = True
+        p_police.add_run("• 警車車牌： ").bold = True
         p_police.add_run(f"{police_veh}\n")
-        p_police.add_run(f"• 到場警員： ").bold = True
+        p_police.add_run("• 到場警員： ").bold = True
         p_police.add_run(f"{police_officer}\n")
-        p_police.add_run(f"• 報案號碼 (RN)： ").bold = True
+        p_police.add_run("• 報案號碼 (RN)： ").bold = True
         p_police.add_run(f"{rn_no}\n")
-        p_police.add_run(f"• 酒精呼氣測試 (PBT)： ").bold = True
+        p_police.add_run("• 酒精呼氣測試 (PBT)： ").bold = True
         p_police.add_run(f"{pbt}\n")
 
         return doc
@@ -353,13 +365,13 @@ def generate_tado_word(data, statement_text):
 
 # 動態生成按鈕標題
 if "TAPI" in app_mode:
-    button_label = "🚀 立即生成 Excel 白皮書"
+    button_label = "🚀 一鍵生成【Excel 白皮書 + Word 附錄】"
 elif "TADO" in app_mode:
-    button_label = "📄 立即生成 Word 附錄報告"
+    button_label = "📄 一鍵生成【Word 附錄報告】"
 else:
-    button_label = "📝 立即生成 T24 正式 Word 報告"
+    button_label = "📝 一鍵生成【T24 正式 Word 報告 + Word 附錄】"
 
-if st.button(button_label):
+if st.button(button_label, type="primary"):
     images_with_tags = []
     
     def process_files(file_list, category_label):
@@ -503,12 +515,9 @@ if st.button(button_label):
                 """
                 
                 contents = raw_images + [prompt]
-                
-                candidate_models = [selected_model, "gemini-1.5-flash", "gemini-2.5-pro"]
-                candidate_models = list(dict.fromkeys(candidate_models))
+                candidate_models = list(dict.fromkeys([selected_model, "gemini-1.5-flash", "gemini-2.5-pro"]))
                 
                 response = None
-                used_model_name = None
                 last_exception = None
 
                 for m_name in candidate_models:
@@ -516,13 +525,10 @@ if st.button(button_label):
                         res = client.models.generate_content(
                             model=m_name,
                             contents=contents,
-                            config=types.GenerateContentConfig(
-                                response_mime_type="application/json"
-                            )
+                            config=types.GenerateContentConfig(response_mime_type="application/json")
                         )
                         if res and res.text:
                             response = res
-                            used_model_name = m_name
                             break
                     except Exception as e:
                         last_exception = e
@@ -533,28 +539,29 @@ if st.button(button_label):
                     raise last_exception if last_exception else Exception("無法從 Google API 取得回應，請稍後再試。")
                 
                 data = json.loads(response.text)
-                
-                st.subheader("📊 AI 自動提取與精準對齊預覽：")
-                st.json(data)
-                
                 vehicles_list = data.get('vehicles', [])
                 first_plate = vehicles_list[0].get('plate_no', 'Unknown').replace(' ', '_') if len(vehicles_list) > 0 else 'Unknown'
-                rn_val = data.get('rn_no', '無')
-                ta_time_val = data.get('ta_time', '無')
                 
-                # 準備日期與星期資訊
                 date_std, date_zh, weekday_zh = parse_date_and_weekday(data.get('ta_date', ''))
 
-                # 準備 WhatsApp 案件通報文字
-                wa_text = f"🚓【交通意外報告已生成】\n• RN編號：{rn_val}\n• 意外時間：{ta_time_val}\n• 涉及車牌：{first_plate}\n• 模式：{app_mode.split(' ')[0]}\n請在附件接收報告檔。"
-                wa_url = f"https://api.whatsapp.com/send?text={urllib.parse.quote(wa_text)}"
+                # ----------------- 1. 無論什麼模式，一律背景同步生成 TADO Word 附錄 -----------------
+                tado_bytes = None
+                tado_filename = f"TADO_附錄報告_{first_plate}.docx"
+                doc_tado = generate_tado_word(data, statement)
+                if doc_tado:
+                    tado_io = io.BytesIO()
+                    doc_tado.save(tado_io)
+                    tado_bytes = tado_io.getvalue()
 
-                # ----------------- 分流 1: TAPI (Excel 白皮書) -----------------
+                # ----------------- 2. 根據選擇模式生成主報告 -----------------
+                main_bytes = None
+                main_filename = ""
+                main_mime = ""
+                t24_2_bytes = None
+                t24_2_filename = ""
+
                 if "TAPI" in app_mode:
-                    template_path = "T26_白皮書_template_v2.xlsx"
-                    output_path = f"白皮書_{first_plate}.xlsx"
-                    
-                    wb = openpyxl.load_workbook(template_path)
+                    wb = openpyxl.load_workbook("T26_白皮書_template_v2.xlsx")
                     ws_data = wb['Data']
                     ws_police = wb['Police']
                     
@@ -629,183 +636,161 @@ if st.button(button_label):
                         ws_data[im["hosp"]] = inj.get('hospital', '')
                         ws_data[im["esc"]] = inj.get('escort', '')
 
-                    if statement:
-                        ws_police.cell(row=5, column=1, value=f"現場紀錄及司機口供：\n{statement}")
-                    
+                    if statement: ws_police.cell(row=5, column=1, value=f"現場紀錄及司機口供：\n{statement}")
                     if os.path.exists("car_diagram.png"):
                         if 'P.1' in wb.sheetnames:
                             ws_p1 = wb['P.1']
                             img_p1 = OpenpyxlImage("car_diagram.png")
-                            img_p1.width = 414
-                            img_p1.height = 347
+                            img_p1.width, img_p1.height = 414, 347
                             ws_p1.add_image(img_p1, 'I41')
-                            
                         if 'P.2' in wb.sheetnames:
                             ws_p2 = wb['P.2']
                             img_p2_1 = OpenpyxlImage("car_diagram.png")
-                            img_p2_1.width = 434
-                            img_p2_1.height = 355
+                            img_p2_1.width, img_p2_1.height = 434, 355
                             ws_p2.add_image(img_p2_1, 'H14')
-                            
                             img_p2_2 = OpenpyxlImage("car_diagram.png")
-                            img_p2_2.width = 437
-                            img_p2_2.height = 334
+                            img_p2_2.width, img_p2_2.height = 437, 334
                             ws_p2.add_image(img_p2_2, 'H39')
                     
-                    wb.save(output_path)
-                    st.success(f"🎉 TAPI 白皮書生成成功！")
-                    
-                    with open(output_path, "rb") as file:
-                        st.download_button(
-                            label="📥 1. 下載 Excel 白皮書 (點擊後直接點手機『分享到 WhatsApp』)",
-                            data=file,
-                            file_name=output_path,
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        )
-                    if os.path.exists(output_path):
-                        os.remove(output_path)
+                    out_io = io.BytesIO()
+                    wb.save(out_io)
+                    main_bytes = out_io.getvalue()
+                    main_filename = f"白皮書_{first_plate}.xlsx"
+                    main_mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
-                # ----------------- 分流 2: TADO (Word 附錄) -----------------
-                elif "TADO" in app_mode:
-                    doc_obj = generate_tado_word(data, statement)
-                    if doc_obj is None:
-                        st.error("⚠️ 無法建立 Word 檔案！請確定 requirements.txt 已加入 python-docx。")
-                    else:
-                        output_word_path = f"TADO_附錄報告_{first_plate}.docx"
-                        doc_obj.save(output_word_path)
-                        st.success(f"🎉 TADO Word 附錄生成成功！(模型：{used_model_name})")
-                        
-                        with open(output_word_path, "rb") as file:
-                            st.download_button(
-                                label="📥 1. 下載 Word 附錄報告 (點擊後直接點手機『分享到 WhatsApp』)",
-                                data=file,
-                                file_name=output_word_path,
-                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                            )
-                        if os.path.exists(output_word_path):
-                            os.remove(output_word_path)
+                elif "T24" in app_mode:
+                    context = {
+                        "{{RN_NO}}": data.get('rn_no', '———'),
+                        "{{TA_DATE}}": date_std,
+                        "{{TA_DATE_ZH}}": date_zh,
+                        "{{TA_TIME}}": data.get('ta_time', '———'),
+                        "{{TA_WEEKDAY}}": weekday_zh,
+                        "{{LOCATION}}": data.get('location', '———'),
+                        "{{POLICE_NO}}": data.get('police_no', '———'),
+                        "{{POLICE_VEH_NO}}": data.get('police_veh_no', '———'),
+                        "{{PBT}}": data.get('breathalyzer_test', '———')
+                    }
+                    for i in range(1, 7):
+                        v_idx = i - 1
+                        if v_idx < len(vehicles_list):
+                            v = vehicles_list[v_idx]
+                            d_statement = v.get('driver_statement', statement if statement else '———')
+                            s_clean = d_statement.strip() if d_statement and d_statement != '———' else '———'
+                            d_statement_formatted = s_clean if (s_clean.startswith('「') and s_clean.endswith('」')) else (f"「{s_clean}」" if s_clean != '———' else '———')
 
-                # ----------------- 分流 3: T24 (正式 Word 報告範本) -----------------
-                else:
-                    if not docx:
-                        st.error("⚠️ 系統未安裝 python-docx 套件，無法處理 T24 Word 範本！")
-                    elif not os.path.exists("T24_template_1.docx"):
-                        st.error("⚠️ 未在 GitHub 找到 `T24_template_1.docx` 範本檔案，請先完成上載！")
-                    else:
-                        # 建立完整 Tag 字典
-                        context = {
-                            "{{RN_NO}}": data.get('rn_no', '———'),
-                            "{{TA_DATE}}": date_std,
-                            "{{TA_DATE_ZH}}": date_zh,
-                            "{{TA_TIME}}": data.get('ta_time', '———'),
-                            "{{TA_WEEKDAY}}": weekday_zh,
-                            "{{LOCATION}}": data.get('location', '———'),
-                            "{{POLICE_NO}}": data.get('police_no', '———'),
-                            "{{POLICE_VEH_NO}}": data.get('police_veh_no', '———'),
-                            "{{PBT}}": data.get('breathalyzer_test', '———')
-                        }
-                        
-                        # 填入車輛 1 至 6 資料 (支援 VEH_X_WEIGHT 簡寫)
-                        for i in range(1, 7):
-                            v_idx = i - 1
-                            if v_idx < len(vehicles_list):
-                                v = vehicles_list[v_idx]
-                                d_statement = v.get('driver_statement', statement if statement else '———')
-                                if d_statement and d_statement != '———':
-                                    s_clean = d_statement.strip()
-                                    if not (s_clean.startswith('「') and s_clean.endswith('」')):
-                                        d_statement_formatted = f"「{s_clean}」"
-                                    else:
-                                        d_statement_formatted = s_clean
-                                else:
-                                    d_statement_formatted = '———'
+                            context["{{" + f"VEH_{i}_PLATE" + "}}"] = v.get('plate_no', '———')
+                            context["{{" + f"VEH_{i}_CLASS_ZH" + "}}"] = v.get('vehicle_class_zh', v.get('vehicle_class_en', '———'))
+                            context["{{" + f"VEH_{i}_CLASS_EN" + "}}"] = v.get('vehicle_class_en', '———')
+                            context["{{" + f"VEH_{i}_WEIGHT" + "}}"] = v.get('gross_weight', '———')
+                            context["{{" + f"VEH_{i}_MAKE" + "}}"] = v.get('make', '———')
+                            context["{{" + f"VEH_{i}_COLOR" + "}}"] = v.get('color', '———')
+                            context["{{" + f"VEH_{i}_TRANS_NO" + "}}"] = v.get('transaction_no', '———')
+                            context["{{" + f"VEH_{i}_EXPIRY" + "}}"] = v.get('expiry_date', '———')
+                            context["{{" + f"VEH_{i}_DAMAGE" + "}}"] = v.get('damage', '———')
+                            context["{{" + f"DRV_{i}_NAME_ZH" + "}}"] = v.get('driver_name_zh', '———')
+                            context["{{" + f"DRV_{i}_NAME_EN" + "}}"] = v.get('driver_name_en', '———')
+                            context["{{" + f"DRV_{i}_HKID" + "}}"] = format_hkid_parentheses(v.get('hkid', '———'))
+                            context["{{" + f"DRV_{i}_LIC" + "}}"] = v.get('driving_license_no', '———')
+                            context["{{" + f"DRV_{i}_ADDR_ZH" + "}}"] = v.get('address_zh', '———')
+                            context["{{" + f"DRV_{i}_ADDR_EN" + "}}"] = v.get('address_en', '———')
+                            context["{{" + f"DRV_{i}_PHONE" + "}}"] = v.get('phone', '———')
+                            context["{{" + f"DRV_{i}_STATEMENT" + "}}"] = d_statement_formatted
+                        else:
+                            for key_suffix in ["PLATE", "CLASS_ZH", "CLASS_EN", "WEIGHT", "MAKE", "COLOR", "TRANS_NO", "EXPIRY", "DAMAGE"]:
+                                context["{{" + f"VEH_{i}_{key_suffix}" + "}}"] = "———"
+                            for key_suffix in ["NAME_ZH", "NAME_EN", "HKID", "LIC", "ADDR_ZH", "ADDR_EN", "PHONE", "STATEMENT"]:
+                                context["{{" + f"DRV_{i}_{key_suffix}" + "}}"] = "———"
 
-                                context[f"{{{{VEH_{i}_PLATE}}}}"] = v.get('plate_no', '———')
-                                context[f"{{{{VEH_{i}_CLASS_ZH}}}}"] = v.get('vehicle_class_zh', v.get('vehicle_class_en', '———'))
-                                context[f"{{{{VEH_{i}_CLASS_EN}}}}"] = v.get('vehicle_class_en', '———')
-                                context[f"{{{{VEH_{i}_WEIGHT}}}}"] = v.get('gross_weight', '———')
-                                context[f"{{{{VEH_{i}_MAKE}}}}"] = v.get('make', '———')
-                                context[f"{{{{VEH_{i}_COLOR}}}}"] = v.get('color', '———')
-                                context[f"{{{{VEH_{i}_TRANS_NO}}}}"] = v.get('transaction_no', '———')
-                                context[f"{{{{VEH_{i}_EXPIRY}}}}"] = v.get('expiry_date', '———')
-                                context[f"{{{{VEH_{i}_DAMAGE}}}}"] = v.get('damage', '———')
-                                
-                                context[f"{{{{DRV_{i}_NAME_ZH}}}}"] = v.get('driver_name_zh', '———')
-                                context[f"{{{{DRV_{i}_NAME_EN}}}}"] = v.get('driver_name_en', '———')
-                                context[f"{{{{DRV_{i}_HKID}}}}"] = format_hkid_parentheses(v.get('hkid', '———'))
-                                context[f"{{{{DRV_{i}_LIC}}}}"] = v.get('driving_license_no', '———')
-                                context[f"{{{{DRV_{i}_ADDR_ZH}}}}"] = v.get('address_zh', '———')
-                                context[f"{{{{DRV_{i}_ADDR_EN}}}}"] = v.get('address_en', '———')
-                                context[f"{{{{DRV_{i}_PHONE}}}}"] = v.get('phone', '———')
-                                context[f"{{{{DRV_{i}_STATEMENT}}}}"] = d_statement_formatted
-                            else:
-                                # 無此車輛時，自動清空 Tag 填入破折號
-                                context[f"{{{{VEH_{i}_PLATE}}}}"] = "———"
-                                context[f"{{{{VEH_{i}_CLASS_ZH}}}}"] = "———"
-                                context[f"{{{{VEH_{i}_CLASS_EN}}}}"] = "———"
-                                context[f"{{{{VEH_{i}_WEIGHT}}}}"] = "———"
-                                context[f"{{{{VEH_{i}_MAKE}}}}"] = "———"
-                                context[f"{{{{VEH_{i}_COLOR}}}}"] = "———"
-                                context[f"{{{{VEH_{i}_TRANS_NO}}}}"] = "———"
-                                context[f"{{{{VEH_{i}_EXPIRY}}}}"] = "———"
-                                context[f"{{{{VEH_{i}_DAMAGE}}}}"] = "———"
-                                
-                                context[f"{{{{DRV_{i}_NAME_ZH}}}}"] = "———"
-                                context[f"{{{{DRV_{i}_NAME_EN}}}}"] = "———"
-                                context[f"{{{{DRV_{i}_HKID}}}}"] = "———"
-                                context[f"{{{{DRV_{i}_LIC}}}}"] = "———"
-                                context[f"{{{{DRV_{i}_ADDR_ZH}}}}"] = "———"
-                                context[f"{{{{DRV_{i}_ADDR_EN}}}}"] = "———"
-                                context[f"{{{{DRV_{i}_PHONE}}}}"] = "———"
-                                context[f"{{{{DRV_{i}_STATEMENT}}}}"] = "———"
+                    doc1 = docx.Document("T24_template_1.docx")
+                    replace_docx_tags(doc1, context)
+                    out_io1 = io.BytesIO()
+                    doc1.save(out_io1)
+                    main_bytes = out_io1.getvalue()
+                    main_filename = f"T24_正式報告_{first_plate}.docx"
+                    main_mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
-                        total_vehs = len(vehicles_list)
-                        
-                        # 處理 第一份 T24 (車輛 1 ~ 3)
-                        doc1 = docx.Document("T24_template_1.docx")
-                        replace_docx_tags(doc1, context)
-                        out_t24_1 = f"T24_正式報告_{first_plate}.docx"
-                        doc1.save(out_t24_1)
-                        
-                        st.success(f"🎉 T24 正式報告生成成功！(包含 {total_vehs} 架車輛資料)")
-                        
-                        with open(out_t24_1, "rb") as file:
-                            st.download_button(
-                                label="📥 1. 下載 T24 正式報告 (車輛 甲/乙/丙)",
-                                data=file,
-                                file_name=out_t24_1,
-                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                            )
-                        if os.path.exists(out_t24_1):
-                            os.remove(out_t24_1)
+                    if len(vehicles_list) > 3 and os.path.exists("T24_template_2.docx"):
+                        doc2 = docx.Document("T24_template_2.docx")
+                        replace_docx_tags(doc2, context)
+                        out_io2 = io.BytesIO()
+                        doc2.save(out_io2)
+                        t24_2_bytes = out_io2.getvalue()
+                        t24_2_filename = f"T24_正式報告_(續頁)_{first_plate}.docx"
 
-                        # 若車輛超過 3 架，自動啟用並生成 第二份 T24 (車輛 4 ~ 6)
-                        if total_vehs > 3:
-                            if os.path.exists("T24_template_2.docx"):
-                                doc2 = docx.Document("T24_template_2.docx")
-                                replace_docx_tags(doc2, context)
-                                out_t24_2 = f"T24_正式報告_(續頁)_{first_plate}.docx"
-                                doc2.save(out_t24_2)
-                                
-                                with open(out_t24_2, "rb") as file2:
-                                    st.download_button(
-                                        label="📥 1b. 下載 T24 正式報告續頁 (車輛 丁/戊/己)",
-                                        data=file2,
-                                        file_name=out_t24_2,
-                                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                                    )
-                                if os.path.exists(out_t24_2):
-                                    os.remove(out_t24_2)
-                            else:
-                                st.warning("⚠️ 檢測到超過 3 架車，但未在 GitHub 找到 `T24_template_2.docx`（續頁範本），已為你完成第一頁輸出。")
-
-                # 💬 2. WhatsApp 案件摘要分享按鈕
-                st.markdown(f'<a href="{wa_url}" target="_blank" class="wa-button">💬 2. 分享案件通報至 WhatsApp 群組</a>', unsafe_allow_html=True)
+                # ----------------- 3. 儲存至 Session State 以保證畫面按鈕持久化 -----------------
+                wa_text = f"🚓【交通意外報告已生成】\n• RN編號：{data.get('rn_no', '無')}\n• 意外時間：{data.get('ta_time', '無')}\n• 涉及車牌：{first_plate}\n• 模式：{app_mode.split(' ')[0]}\n請在附件接收報告檔。"
                 
-                st.divider()
-                # 🔄 3. 重置按鈕
-                if st.button("🔄 重新開始 / 處理下宗案件"):
-                    st.rerun()
+                st.session_state["current_mode"] = app_mode
+                st.session_state["main_bytes"] = main_bytes
+                st.session_state["main_filename"] = main_filename
+                st.session_state["main_mime"] = main_mime
+                st.session_state["tado_bytes"] = tado_bytes
+                st.session_state["tado_filename"] = tado_filename
+                st.session_state["t24_2_bytes"] = t24_2_bytes
+                st.session_state["t24_2_filename"] = t24_2_filename
+                st.session_state["wa_url"] = f"https://api.whatsapp.com/send?text={urllib.parse.quote(wa_text)}"
+                st.session_state["preview_data"] = data
+                st.session_state["generated"] = True
+                
+                st.rerun()
 
             except Exception as e:
                 st.error(f"發生錯誤：{str(e)}")
+
+# ----------------- 4. 持久化雙下載按鈕區 -----------------
+if st.session_state.get("generated"):
+    st.subheader("📊 AI 自動提取與精準對齊預覽：")
+    st.json(st.session_state["preview_data"])
+    
+    st.success("🎉 報告生成成功！請於下方按鈕下載（點擊其中一個下載後，頁面按鈕會保持，可繼續點擊下載另一個）：")
+    
+    cur_mode = st.session_state.get("current_mode", "")
+    
+    # 若為 TAPI 或 T24 模式：顯示「主報告 + Word 附錄」雙按鈕
+    if "TAPI" in cur_mode or "T24" in cur_mode:
+        col_dl1, col_dl2 = st.columns(2)
+        with col_dl1:
+            st.download_button(
+                label=f"📥 1. 下載主要報告 ({st.session_state['main_filename']})",
+                data=st.session_state["main_bytes"],
+                file_name=st.session_state["main_filename"],
+                mime=st.session_state["main_mime"],
+                key="dl_main_btn"
+            )
+        with col_dl2:
+            if st.session_state["tado_bytes"]:
+                st.download_button(
+                    label=f"📄 2. 下載 Word 附錄報告 ({st.session_state['tado_filename']})",
+                    data=st.session_state["tado_bytes"],
+                    file_name=st.session_state["tado_filename"],
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    key="dl_tado_btn"
+                )
+
+        if st.session_state.get("t24_2_bytes"):
+            st.download_button(
+                label=f"📥 1b. 下載 T24 正式報告續頁 ({st.session_state['t24_2_filename']})",
+                data=st.session_state["t24_2_bytes"],
+                file_name=st.session_state["t24_2_filename"],
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                key="dl_t24_2_btn"
+            )
+
+    # 若為 TADO 模式：單獨顯示 Word 附錄
+    else:
+        if st.session_state["tado_bytes"]:
+            st.download_button(
+                label=f"📄 下載 Word 附錄報告 ({st.session_state['tado_filename']})",
+                data=st.session_state["tado_bytes"],
+                file_name=st.session_state["tado_filename"],
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                key="dl_tado_single_btn"
+            )
+
+    st.markdown(f'<a href="{st.session_state["wa_url"]}" target="_blank" class="wa-button">💬 分享案件通報至 WhatsApp 群組</a>', unsafe_allow_html=True)
+    
+    st.divider()
+    if st.button("🔄 重新開始 / 處理下宗案件"):
+        for k in state_keys:
+            st.session_state[k] = state_keys[k]
+        st.rerun()
