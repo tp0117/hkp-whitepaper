@@ -8,6 +8,7 @@ import os
 import time
 import re
 import urllib.parse
+from datetime import datetime
 from PIL import Image
 
 # 嘗試載入 python-docx 用於生成 Word 檔
@@ -19,7 +20,7 @@ except Exception:
     docx = None
 
 # 1. 網頁標題及頁面設定 (必須是第一個 Streamlit 指令)
-st.set_page_config(page_title="交通意外資料處理系統 (TAPI/TADO)", page_icon="🚓", layout="wide")
+st.set_page_config(page_title="交通意外資料處理系統 (TAPI / TADO / T24)", page_icon="🚓", layout="wide")
 
 # 2. UI 手機化美化 (Custom CSS)
 st.markdown("""
@@ -92,6 +93,58 @@ def format_hkid_parentheses(code_str):
         return f"{match.group(1)}({match.group(2)})"
     return s
 
+# Helper 函數：日期解析與中文/星期轉換
+def parse_date_and_weekday(date_str):
+    if not date_str or date_str == "———":
+        return "———", "———", "———"
+    
+    s = str(date_str).strip()
+    dt = None
+    
+    # 嘗試多種常見日期格式
+    for fmt in ["%d/%m/%Y", "%Y-%m-%d", "%Y/%m/%d", "%d-%m-%Y", "%Y.%m.%d"]:
+        try:
+            dt = datetime.strptime(s, fmt)
+            break
+        except ValueError:
+            pass
+            
+    if dt:
+        weekday_map = {0: "一", 1: "二", 2: "三", 3: "四", 4: "五", 5: "六", 6: "日"}
+        weekday_zh = weekday_map[dt.weekday()]
+        date_zh = f"{dt.year}年{dt.month}月{dt.day}日"
+        date_std = dt.strftime("%d/%m/%Y")
+        return date_std, date_zh, weekday_zh
+    
+    # 若 AI 傳入原本就是中文日期
+    match_zh = re.search(r'(\d{4})年(\d{1,2})月(\d{1,2})日', s)
+    if match_zh:
+        y, m, d = int(match_zh.group(1)), int(match_zh.group(2)), int(match_zh.group(3))
+        dt = datetime(y, m, d)
+        weekday_map = {0: "一", 1: "二", 2: "三", 3: "四", 4: "五", 5: "六", 6: "日"}
+        weekday_zh = weekday_map[dt.weekday()]
+        return f"{d:02d}/{m:02d}/{y}", f"{y}年{m}月{d}日", weekday_zh
+
+    return s, s, "———"
+
+# Helper 函數：替換 Word 文件中的所有 Tag
+def replace_docx_tags(doc, context):
+    def replace_in_p(p):
+        full_text = p.text
+        for k, v in context.items():
+            if k in full_text:
+                full_text = full_text.replace(k, str(v) if (v is not None and str(v).strip() != "") else "———")
+        if full_text != p.text:
+            p.text = full_text
+
+    for p in doc.paragraphs:
+        replace_in_p(p)
+    for t in doc.tables:
+        for r in t.rows:
+            for c in r.cells:
+                for p in c.paragraphs:
+                    replace_in_p(p)
+
 # 🔒 密碼鎖設定：優先從 Secrets 讀取 APP_PASSWORD，若未設定則預設為 "8888"
 APP_PASSWORD = st.secrets.get("APP_PASSWORD", "8888")
 
@@ -101,7 +154,7 @@ if "authenticated" not in st.session_state:
 
 # 若未通過驗證，顯示密碼輸入畫面
 if not st.session_state["authenticated"]:
-    st.title("🔒 白皮書 / TADO 系統 - 安全驗證")
+    st.title("🔒 白皮書 / TADO / T24 系統 - 安全驗證")
     st.info("本系統僅供內部授權人員使用，請輸入訪問密碼。")
     
     input_pwd = st.text_input("請輸入訪問密碼：", type="password")
@@ -117,9 +170,9 @@ if not st.session_state["authenticated"]:
 
 # ----------------- 以下為驗證通過後的系統主介面 -----------------
 
-st.title("🚓 交通意外資料處理系統 (TAPI 白皮書 / TADO Word 附錄)")
+st.title("🚓 交通意外資料處理系統 (TAPI / TADO / T24)")
 
-# 頂部控制欄：提供重置/重新開始按鈕
+# 頂部控制欄：提供重置按鈕
 top_col1, top_col2 = st.columns([3, 1])
 with top_col2:
     if st.button("🔄 重置頁面"):
@@ -152,7 +205,11 @@ with st.sidebar:
 st.subheader("📌 1. 請選擇案件類型與生成格式")
 app_mode = st.radio(
     "請選擇要處理的意外類型：",
-    ["TAPI (有人受傷 - 生成 Excel 白皮書)", "TADO (僅車損 - 生成 Word 附錄)"],
+    [
+        "TAPI (有人受傷 - 生成 Excel 白皮書)", 
+        "TADO (僅車損 - 生成 Word 附錄)", 
+        "T24 (正式報告 - 生成 T24 Word 檔)"
+    ],
     horizontal=True
 )
 
@@ -186,7 +243,7 @@ st.divider()
 st.subheader("📝 3. 司機口供及補充文字 (可選填)")
 statement = st.text_area("請輸入額外口供、酒精測試結果或補充資料 (若相片已包含所有資料，此處可留空)", height=100)
 
-# Helper: 生成精準排版的 TADO Word 附錄檔
+# Helper: 生成 TADO Word 附錄檔
 def generate_tado_word(data, statement_text):
     if not docx:
         return None
@@ -197,7 +254,7 @@ def generate_tado_word(data, statement_text):
             h.alignment = WD_ALIGN_PARAGRAPH.CENTER
         
         vehicles = data.get('vehicles', [])
-        veh_labels = ["甲", "乙", "丙", "丁", "戊"]
+        veh_labels = ["甲", "乙", "丙", "丁", "戊", "己"]
         
         for idx, v in enumerate(vehicles):
             label_char = veh_labels[idx] if idx < len(veh_labels) else str(idx + 1)
@@ -294,8 +351,13 @@ def generate_tado_word(data, statement_text):
         st.error(f"建立 Word 文件時發生錯誤：{str(err)}")
         return None
 
-# 生成按鈕
-button_label = "🚀 立即生成 Excel 白皮書" if "TAPI" in app_mode else "📄 立即生成 Word 附錄報告"
+# 動態生成按鈕標題
+if "TAPI" in app_mode:
+    button_label = "🚀 立即生成 Excel 白皮書"
+elif "TADO" in app_mode:
+    button_label = "📄 立即生成 Word 附錄報告"
+else:
+    button_label = "📝 立即生成 T24 正式 Word 報告"
 
 if st.button(button_label):
     images_with_tags = []
@@ -480,11 +542,14 @@ if st.button(button_label):
                 rn_val = data.get('rn_no', '無')
                 ta_time_val = data.get('ta_time', '無')
                 
+                # 準備日期與星期資訊
+                date_std, date_zh, weekday_zh = parse_date_and_weekday(data.get('ta_date', ''))
+
                 # 準備 WhatsApp 案件通報文字
-                wa_text = f"🚓【交通意外報告已生成】\n• RN編號：{rn_val}\n• 意外時間：{ta_time_val}\n• 涉及車牌：{first_plate}\n• 模式：{'TAPI 白皮書 (Excel)' if 'TAPI' in app_mode else 'TADO 附錄 (Word)'}\n請在附件接收報告檔。"
+                wa_text = f"🚓【交通意外報告已生成】\n• RN編號：{rn_val}\n• 意外時間：{ta_time_val}\n• 涉及車牌：{first_plate}\n• 模式：{app_mode.split(' ')[0]}\n請在附件接收報告檔。"
                 wa_url = f"https://api.whatsapp.com/send?text={urllib.parse.quote(wa_text)}"
 
-                # 分流處理：TAPI (Excel 白皮書) 或 TADO (Word 附錄)
+                # ----------------- 分流 1: TAPI (Excel 白皮書) -----------------
                 if "TAPI" in app_mode:
                     template_path = "T26_白皮書_template_v2.xlsx"
                     output_path = f"白皮書_{first_plate}.xlsx"
@@ -495,7 +560,7 @@ if st.button(button_label):
                     
                     if data.get('log_no'): ws_data['B1'] = data.get('log_no')
                     if data.get('rn_no'): ws_data['B2'] = data.get('rn_no')
-                    if data.get('ta_date'): ws_data['B3'] = data.get('ta_date')
+                    if data.get('ta_date'): ws_data['B3'] = date_std
                     if data.get('ta_time'): ws_data['B4'] = data.get('ta_time')
                     if data.get('location'): ws_data['B5'] = data.get('location')
                     if data.get('tunnel_staff_arrived'): ws_data['B6'] = data.get('tunnel_staff_arrived')
@@ -600,7 +665,8 @@ if st.button(button_label):
                     if os.path.exists(output_path):
                         os.remove(output_path)
 
-                else:
+                # ----------------- 分流 2: TADO (Word 附錄) -----------------
+                elif "TADO" in app_mode:
                     doc_obj = generate_tado_word(data, statement)
                     if doc_obj is None:
                         st.error("⚠️ 無法建立 Word 檔案！請確定 requirements.txt 已加入 python-docx。")
@@ -618,12 +684,126 @@ if st.button(button_label):
                             )
                         if os.path.exists(output_word_path):
                             os.remove(output_word_path)
-                
+
+                # ----------------- 分流 3: T24 (正式 Word 報告範本) -----------------
+                else:
+                    if not docx:
+                        st.error("⚠️ 系統未安裝 python-docx 套件，無法處理 T24 Word 範本！")
+                    elif not os.path.exists("T24_template_1.docx"):
+                        st.error("⚠️ 未在 GitHub 找到 `T24_template_1.docx` 範本檔案，請先完成上載！")
+                    else:
+                        # 建立完整 Tag 字典
+                        context = {
+                            "{{RN_NO}}": data.get('rn_no', '———'),
+                            "{{TA_DATE}}": date_std,
+                            "{{TA_DATE_ZH}}": date_zh,
+                            "{{TA_TIME}}": data.get('ta_time', '———'),
+                            "{{TA_WEEKDAY}}": weekday_zh,
+                            "{{LOCATION}}": data.get('location', '———'),
+                            "{{POLICE_NO}}": data.get('police_no', '———'),
+                            "{{POLICE_VEH_NO}}": data.get('police_veh_no', '———'),
+                            "{{PBT}}": data.get('breathalyzer_test', '———')
+                        }
+                        
+                        # 填入車輛 1 至 6 資料 (支援 VEH_X_WEIGHT 簡寫)
+                        for i in range(1, 7):
+                            v_idx = i - 1
+                            if v_idx < len(vehicles_list):
+                                v = vehicles_list[v_idx]
+                                d_statement = v.get('driver_statement', statement if statement else '———')
+                                if d_statement and d_statement != '———':
+                                    s_clean = d_statement.strip()
+                                    if not (s_clean.startswith('「') and s_clean.endswith('」')):
+                                        d_statement_formatted = f"「{s_clean}」"
+                                    else:
+                                        d_statement_formatted = s_clean
+                                else:
+                                    d_statement_formatted = '———'
+
+                                context[f"{{{{VEH_{i}_PLATE}}}}"] = v.get('plate_no', '———')
+                                context[f"{{{{VEH_{i}_CLASS_ZH}}}}"] = v.get('vehicle_class_zh', v.get('vehicle_class_en', '———'))
+                                context[f"{{{{VEH_{i}_CLASS_EN}}}}"] = v.get('vehicle_class_en', '———')
+                                context[f"{{{{VEH_{i}_WEIGHT}}}}"] = v.get('gross_weight', '———')
+                                context[f"{{{{VEH_{i}_MAKE}}}}"] = v.get('make', '———')
+                                context[f"{{{{VEH_{i}_COLOR}}}}"] = v.get('color', '———')
+                                context[f"{{{{VEH_{i}_TRANS_NO}}}}"] = v.get('transaction_no', '———')
+                                context[f"{{{{VEH_{i}_EXPIRY}}}}"] = v.get('expiry_date', '———')
+                                context[f"{{{{VEH_{i}_DAMAGE}}}}"] = v.get('damage', '———')
+                                
+                                context[f"{{{{DRV_{i}_NAME_ZH}}}}"] = v.get('driver_name_zh', '———')
+                                context[f"{{{{DRV_{i}_NAME_EN}}}}"] = v.get('driver_name_en', '———')
+                                context[f"{{{{DRV_{i}_HKID}}}}"] = format_hkid_parentheses(v.get('hkid', '———'))
+                                context[f"{{{{DRV_{i}_LIC}}}}"] = v.get('driving_license_no', '———')
+                                context[f"{{{{DRV_{i}_ADDR_ZH}}}}"] = v.get('address_zh', '———')
+                                context[f"{{{{DRV_{i}_ADDR_EN}}}}"] = v.get('address_en', '———')
+                                context[f"{{{{DRV_{i}_PHONE}}}}"] = v.get('phone', '———')
+                                context[f"{{{{DRV_{i}_STATEMENT}}}}"] = d_statement_formatted
+                            else:
+                                # 無此車輛時，自動清空 Tag 填入破折號
+                                context[f"{{{{VEH_{i}_PLATE}}}}"] = "———"
+                                context[f"{{{{VEH_{i}_CLASS_ZH}}}}"] = "———"
+                                context[f"{{{{VEH_{i}_CLASS_EN}}}}"] = "———"
+                                context[f"{{{{VEH_{i}_WEIGHT}}}}"] = "———"
+                                context[f"{{{{VEH_{i}_MAKE}}}}"] = "———"
+                                context[f"{{{{VEH_{i}_COLOR}}}}"] = "———"
+                                context[f"{{{{VEH_{i}_TRANS_NO}}}}"] = "———"
+                                context[f"{{{{VEH_{i}_EXPIRY}}}}"] = "———"
+                                context[f"{{{{VEH_{i}_DAMAGE}}}}"] = "———"
+                                
+                                context[f"{{{{DRV_{i}_NAME_ZH}}}}"] = "———"
+                                context[f"{{{{DRV_{i}_NAME_EN}}}}"] = "———"
+                                context[f"{{{{DRV_{i}_HKID}}}}"] = "———"
+                                context[f"{{{{DRV_{i}_LIC}}}}"] = "———"
+                                context[f"{{{{DRV_{i}_ADDR_ZH}}}}"] = "———"
+                                context[f"{{{{DRV_{i}_ADDR_EN}}}}"] = "———"
+                                context[f"{{{{DRV_{i}_PHONE}}}}"] = "———"
+                                context[f"{{{{DRV_{i}_STATEMENT}}}}"] = "———"
+
+                        total_vehs = len(vehicles_list)
+                        
+                        # 處理 第一份 T24 (車輛 1 ~ 3)
+                        doc1 = docx.Document("T24_template_1.docx")
+                        replace_docx_tags(doc1, context)
+                        out_t24_1 = f"T24_正式報告_{first_plate}.docx"
+                        doc1.save(out_t24_1)
+                        
+                        st.success(f"🎉 T24 正式報告生成成功！(包含 {total_vehs} 架車輛資料)")
+                        
+                        with open(out_t24_1, "rb") as file:
+                            st.download_button(
+                                label="📥 1. 下載 T24 正式報告 (車輛 甲/乙/丙)",
+                                data=file,
+                                file_name=out_t24_1,
+                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                            )
+                        if os.path.exists(out_t24_1):
+                            os.remove(out_t24_1)
+
+                        # 若車輛超過 3 架，自動啟用並生成 第二份 T24 (車輛 4 ~ 6)
+                        if total_vehs > 3:
+                            if os.path.exists("T24_template_2.docx"):
+                                doc2 = docx.Document("T24_template_2.docx")
+                                replace_docx_tags(doc2, context)
+                                out_t24_2 = f"T24_正式報告_(續頁)_{first_plate}.docx"
+                                doc2.save(out_t24_2)
+                                
+                                with open(out_t24_2, "rb") as file2:
+                                    st.download_button(
+                                        label="📥 1b. 下載 T24 正式報告續頁 (車輛 丁/戊/己)",
+                                        data=file2,
+                                        file_name=out_t24_2,
+                                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                                    )
+                                if os.path.exists(out_t24_2):
+                                    os.remove(out_t24_2)
+                            else:
+                                st.warning("⚠️ 檢測到超過 3 架車，但未在 GitHub 找到 `T24_template_2.docx`（續頁範本），已為你完成第一頁輸出。")
+
                 # 💬 2. WhatsApp 案件摘要分享按鈕
                 st.markdown(f'<a href="{wa_url}" target="_blank" class="wa-button">💬 2. 分享案件通報至 WhatsApp 群組</a>', unsafe_allow_html=True)
                 
                 st.divider()
-                # 🔄 3. 重置按鈕：重新開始處理下宗案件
+                # 🔄 3. 重置按鈕
                 if st.button("🔄 重新開始 / 處理下宗案件"):
                     st.rerun()
 
