@@ -7,6 +7,7 @@ import json
 import os
 import time
 import re
+import io
 import urllib.parse
 from datetime import datetime
 from PIL import Image
@@ -20,7 +21,7 @@ except Exception:
     docx = None
 
 # 1. 網頁標題及頁面設定 (必須是第一個 Streamlit 指令)
-st.set_page_config(page_title="交通意外資料處理系統 (TAPI / TADO / T24)", page_icon="🚓", layout="wide")
+st.set_page_config(page_title="交通意外資料處理系統 (TAPI / TADO / T24 + T17A)", page_icon="🚓", layout="wide")
 
 # 2. UI 手機化美化 (Custom CSS)
 st.markdown("""
@@ -145,6 +146,131 @@ def replace_docx_tags(doc, context):
                 for p in c.paragraphs:
                     replace_in_p(p)
 
+# Helper 函數：生成 IMSP-T17A Excel 相片報告表
+def generate_t17_excel(template_path, data, photo_items, current_app_mode):
+    """
+    全自動填寫 IMSP-T17A 相片報告表:
+    - 日期: B44
+    - 時間: F44
+    - 主題: M44 (T.A.P.I. 或 T.A.D.O. (HIT&RUN))
+    - 地點: C46
+    - 職員編號: N46
+    - 公式保護區: C49, D49, E49 (完全不碰動)
+    - 相片 (1): 定位 C5, 圖說 C21
+    - 相片 (2): 定位 C24, 圖說 C41
+    """
+    if not os.path.exists(template_path):
+        return None
+
+    wb = openpyxl.load_workbook(template_path)
+    total_photos = len(photo_items)
+    sheets_needed = max(1, (total_photos + 1) // 2)
+
+    # 基礎案件資料
+    date_std, _, _ = parse_date_and_weekday(data.get('ta_date', ''))
+    date_val = date_std if date_std != '———' else data.get('ta_date', '')
+    time_val = data.get('ta_time', '')
+    
+    topic_val = "T.A.P.I." if "TAPI" in current_app_mode else "T.A.D.O. (HIT&RUN)"
+    location_val = data.get('location', '')
+    officer_val = data.get('ai_staff_no') or data.get('police_no') or ''
+
+    photo_idx = 0
+
+    for sheet_num in range(1, 9):
+        # 相容不同大小寫的工作表名稱
+        possible_names = [f"photo ({sheet_num})", f"PHOTO ({sheet_num})", f"photo({sheet_num})", f"PHOTO({sheet_num})"]
+        s_name = None
+        for name in possible_names:
+            if name in wb.sheetnames:
+                s_name = name
+                break
+        
+        if not s_name:
+            continue
+
+        ws = wb[s_name]
+
+        # 超過所需頁數自動隱藏工作表
+        if sheet_num > sheets_needed:
+            ws.sheet_state = 'hidden'
+            continue
+
+        # 寫入底部案件固定資料
+        if date_val and date_val != '———': ws['B44'] = date_val
+        if time_val and time_val != '———': ws['F44'] = time_val
+        ws['M44'] = topic_val
+        if location_val and location_val != '———': ws['C46'] = location_val
+        if officer_val and officer_val != '———': ws['N46'] = officer_val
+        # 注意：C49, D49, E49 保留 Excel 原生公式，絕不變動寫入！
+
+        # ----------------------------------
+        # 相片 (1) 區塊 (定位 C5 / 圖說 C21)
+        # ----------------------------------
+        if photo_idx < total_photos:
+            p_item = photo_items[photo_idx]
+            
+            img_obj = p_item['img'].copy()
+            img_obj.thumbnail((450, 260))
+            
+            img_io = io.BytesIO()
+            img_obj.save(img_io, format='PNG')
+            img_io.seek(0)
+            
+            xl_img = OpenpyxlImage(img_io)
+            ws.add_image(xl_img, 'C5')
+
+            if p_item.get('is_scene', False):
+                ws['C21'] = "相片顯示肇事交通意外現場情況。"
+            else:
+                v_label = p_item.get('veh_label', '甲')
+                v_class = p_item.get('veh_class_zh', '車輛')
+                if not v_class or v_class == '———': v_class = '車輛'
+                v_plate = p_item.get('plate_no', '')
+                if v_plate == '———': v_plate = ''
+                v_dmg = p_item.get('damage', '')
+                if v_dmg == '———': v_dmg = '車身毀爛'
+                
+                ws['C21'] = f"相片顯示（車輛{v_label}）{v_class} {v_plate} {v_dmg}。"
+
+            photo_idx += 1
+
+        # ----------------------------------
+        # 相片 (2) 區塊 (定位 C24 / 圖說 C41)
+        # ----------------------------------
+        if photo_idx < total_photos:
+            p_item = photo_items[photo_idx]
+            
+            img_obj = p_item['img'].copy()
+            img_obj.thumbnail((450, 260))
+            
+            img_io = io.BytesIO()
+            img_obj.save(img_io, format='PNG')
+            img_io.seek(0)
+            
+            xl_img = OpenpyxlImage(img_io)
+            ws.add_image(xl_img, 'C24')
+
+            if p_item.get('is_scene', False):
+                ws['C41'] = "相片顯示肇事交通意外現場情況。"
+            else:
+                v_label = p_item.get('veh_label', '甲')
+                v_class = p_item.get('veh_class_zh', '車輛')
+                if not v_class or v_class == '———': v_class = '車輛'
+                v_plate = p_item.get('plate_no', '')
+                if v_plate == '———': v_plate = ''
+                v_dmg = p_item.get('damage', '')
+                if v_dmg == '———': v_dmg = '車身毀爛'
+                
+                ws['C41'] = f"相片顯示（車輛{v_label}）{v_class} {v_plate} {v_dmg}。"
+
+            photo_idx += 1
+
+    out_stream = io.BytesIO()
+    wb.save(out_stream)
+    out_stream.seek(0)
+    return out_stream
+
 # 🔒 密碼鎖設定：優先從 Secrets 讀取 APP_PASSWORD，若未設定則預設為 "8888"
 APP_PASSWORD = st.secrets.get("APP_PASSWORD", "8888")
 
@@ -170,7 +296,7 @@ if not st.session_state["authenticated"]:
 
 # ----------------- 以下為驗證通過後的系統主介面 -----------------
 
-st.title("🚓 交通意外資料處理系統 (TAPI / TADO / T24)")
+st.title("🚓 交通意外資料處理系統 (TAPI / TADO / T24 + T17A)")
 
 # 頂部控制欄：提供重置按鈕
 top_col1, top_col2 = st.columns([3, 1])
@@ -202,13 +328,13 @@ with st.sidebar:
         st.rerun()
 
 # ----------------- 1. 選擇案件處理模式 -----------------
-st.subheader("📌 1. 請選擇案件類型與生成格式")
+st.subheader("📌 1. 請選擇案件類型與生成格式 (預設連同 T17A 相片表雙檔輸出)")
 app_mode = st.radio(
     "請選擇要處理的意外類型：",
     [
-        "TAPI (有人受傷 - 生成 Excel 白皮書)", 
-        "TADO (僅車損 - 生成 Word 附錄)", 
-        "T24 (正式報告 - 生成 T24 Word 檔)"
+        "TAPI + T17 (有人受傷 - 生成 Excel 白皮書 + 相片表)", 
+        "TADO + T17 (僅車損 - 生成 Word 附錄 + 相片表)", 
+        "T24 + T17 (正式報告 - 生成 T24 Word 檔 + 相片表)"
     ],
     horizontal=True
 )
@@ -353,34 +479,40 @@ def generate_tado_word(data, statement_text):
 
 # 動態生成按鈕標題
 if "TAPI" in app_mode:
-    button_label = "🚀 立即生成 Excel 白皮書"
+    button_label = "🚀 一鍵生成【TAPI 白皮書 + T17 相片表】"
 elif "TADO" in app_mode:
-    button_label = "📄 立即生成 Word 附錄報告"
+    button_label = "📄 一鍵生成【TADO Word 附錄 + T17 相片表】"
 else:
-    button_label = "📝 立即生成 T24 正式 Word 報告"
+    button_label = "📝 一鍵生成【T24 正式報告 + T17 相片表】"
 
 if st.button(button_label):
     images_with_tags = []
+    photo_items_for_t17 = []
     
-    def process_files(file_list, category_label):
+    def process_files(file_list, category_label, is_scene_flag, veh_label_char):
         imgs = []
         if file_list:
             for f in file_list:
                 img = Image.open(f)
                 imgs.append((img, category_label))
+                photo_items_for_t17.append({
+                    "img": img,
+                    "is_scene": is_scene_flag,
+                    "veh_label": veh_label_char
+                })
         return imgs
 
-    images_with_tags.extend(process_files(files_main, "手填紀錄單 (IMSP-T3)"))
-    images_with_tags.extend(process_files(files_veh_a, "車輛 甲 (Vehicle A)"))
-    images_with_tags.extend(process_files(files_veh_b, "車輛 乙 (Vehicle B)"))
-    images_with_tags.extend(process_files(files_veh_c, "車輛 丙 (Vehicle C)"))
+    images_with_tags.extend(process_files(files_main, "手填紀錄單 (IMSP-T3)", True, "現場"))
+    images_with_tags.extend(process_files(files_veh_a, "車輛 甲 (Vehicle A)", False, "甲"))
+    images_with_tags.extend(process_files(files_veh_b, "車輛 乙 (Vehicle B)", False, "乙"))
+    images_with_tags.extend(process_files(files_veh_c, "車輛 丙 (Vehicle C)", False, "丙"))
 
     if not api_key:
         st.error("請先輸入或設定 Gemini API Key！")
     elif not images_with_tags and not statement:
         st.error("請最少上載一張相片或輸入文字資料！")
     else:
-        with st.spinner('AI 正在全方位辨識（包含對齊 IMSP-T3 頂部車輛類別與傷者資訊）...'):
+        with st.spinner('AI 正在全方位辨識並同步構建 T17 相片表數據...'):
             try:
                 client = genai.Client(api_key=api_key.strip())
                 raw_images = [item[0] for item in images_with_tags]
@@ -545,11 +677,28 @@ if st.button(button_label):
                 # 準備日期與星期資訊
                 date_std, date_zh, weekday_zh = parse_date_and_weekday(data.get('ta_date', ''))
 
+                # 為 T17A 相片表補充車輛車牌與損毀細節
+                label_mapping = {"甲": 0, "乙": 1, "丙": 2, "丁": 3, "戊": 4, "己": 5}
+                for item in photo_items_for_t17:
+                    if not item.get('is_scene'):
+                        v_char = item.get('veh_label', '甲')
+                        idx_num = label_mapping.get(v_char, 0)
+                        if idx_num < len(vehicles_list):
+                            v_obj = vehicles_list[idx_num]
+                            item['veh_class_zh'] = v_obj.get('vehicle_class_zh', v_obj.get('vehicle_class_en', '車輛'))
+                            item['plate_no'] = v_obj.get('plate_no', '')
+                            item['damage'] = v_obj.get('damage', '車身毀爛')
+
+                # 生成 IMSP-T17A 相片表 (如果範本檔存在)
+                t17_stream = None
+                if os.path.exists("T17_template.xlsx"):
+                    t17_stream = generate_t17_excel("T17_template.xlsx", data, photo_items_for_t17, app_mode)
+
                 # 準備 WhatsApp 案件通報文字
                 wa_text = f"🚓【交通意外報告已生成】\n• RN編號：{rn_val}\n• 意外時間：{ta_time_val}\n• 涉及車牌：{first_plate}\n• 模式：{app_mode.split(' ')[0]}\n請在附件接收報告檔。"
                 wa_url = f"https://api.whatsapp.com/send?text={urllib.parse.quote(wa_text)}"
 
-                # ----------------- 分流 1: TAPI (Excel 白皮書) -----------------
+                # ----------------- 分流 1: TAPI (Excel 白皮書 + T17) -----------------
                 if "TAPI" in app_mode:
                     template_path = "T26_白皮書_template_v2.xlsx"
                     output_path = f"白皮書_{first_plate}.xlsx"
@@ -653,19 +802,32 @@ if st.button(button_label):
                             ws_p2.add_image(img_p2_2, 'H39')
                     
                     wb.save(output_path)
-                    st.success(f"🎉 TAPI 白皮書生成成功！")
+                    st.success(f"🎉 TAPI 白皮書與 T17 相片表雙檔生成成功！")
                     
-                    with open(output_path, "rb") as file:
-                        st.download_button(
-                            label="📥 1. 下載 Excel 白皮書 (點擊後直接點手機『分享到 WhatsApp』)",
-                            data=file,
-                            file_name=output_path,
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        )
+                    col_dl1, col_dl2 = st.columns(2)
+                    with col_dl1:
+                        with open(output_path, "rb") as file:
+                            st.download_button(
+                                label="📥 1a. 下載 Excel 白皮書",
+                                data=file,
+                                file_name=output_path,
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                            )
+                    with col_dl2:
+                        if t17_stream:
+                            st.download_button(
+                                label="🖼️ 1b. 下載 IMSP-T17A 相片報告表 (XLSX)",
+                                data=t17_stream,
+                                file_name=f"IMSP-T17A_相片報告_{first_plate}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                            )
+                        else:
+                            st.warning("⚠️ 未能在 GitHub 找到 `T17_template.xlsx` 範本檔案。")
+
                     if os.path.exists(output_path):
                         os.remove(output_path)
 
-                # ----------------- 分流 2: TADO (Word 附錄) -----------------
+                # ----------------- 分流 2: TADO (Word 附錄 + T17) -----------------
                 elif "TADO" in app_mode:
                     doc_obj = generate_tado_word(data, statement)
                     if doc_obj is None:
@@ -673,19 +835,32 @@ if st.button(button_label):
                     else:
                         output_word_path = f"TADO_附錄報告_{first_plate}.docx"
                         doc_obj.save(output_word_path)
-                        st.success(f"🎉 TADO Word 附錄生成成功！(模型：{used_model_name})")
+                        st.success(f"🎉 TADO Word 附錄與 T17 相片表雙檔生成成功！")
                         
-                        with open(output_word_path, "rb") as file:
-                            st.download_button(
-                                label="📥 1. 下載 Word 附錄報告 (點擊後直接點手機『分享到 WhatsApp』)",
-                                data=file,
-                                file_name=output_word_path,
-                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                            )
+                        col_dl1, col_dl2 = st.columns(2)
+                        with col_dl1:
+                            with open(output_word_path, "rb") as file:
+                                st.download_button(
+                                    label="📥 1a. 下載 Word 附錄報告",
+                                    data=file,
+                                    file_name=output_word_path,
+                                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                                )
+                        with col_dl2:
+                            if t17_stream:
+                                st.download_button(
+                                    label="🖼️ 1b. 下載 IMSP-T17A 相片報告表 (XLSX)",
+                                    data=t17_stream,
+                                    file_name=f"IMSP-T17A_相片報告_{first_plate}.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                )
+                            else:
+                                st.warning("⚠️ 未能在 GitHub 找到 `T17_template.xlsx` 範本檔案。")
+
                         if os.path.exists(output_word_path):
                             os.remove(output_word_path)
 
-                # ----------------- 分流 3: T24 (正式 Word 報告範本) -----------------
+                # ----------------- 分流 3: T24 (正式 Word 報告 + T17) -----------------
                 else:
                     if not docx:
                         st.error("⚠️ 系統未安裝 python-docx 套件，無法處理 T24 Word 範本！")
@@ -767,15 +942,29 @@ if st.button(button_label):
                         out_t24_1 = f"T24_正式報告_{first_plate}.docx"
                         doc1.save(out_t24_1)
                         
-                        st.success(f"🎉 T24 正式報告生成成功！(包含 {total_vehs} 架車輛資料)")
+                        st.success(f"🎉 T24 正式報告與 T17 相片表雙檔生成成功！(包含 {total_vehs} 架車輛資料)")
                         
-                        with open(out_t24_1, "rb") as file:
-                            st.download_button(
-                                label="📥 1. 下載 T24 正式報告 (車輛 甲/乙/丙)",
-                                data=file,
-                                file_name=out_t24_1,
-                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                            )
+                        # 雙按鈕 / 三按鈕下載區
+                        col_dl1, col_dl2 = st.columns(2)
+                        with col_dl1:
+                            with open(out_t24_1, "rb") as file:
+                                st.download_button(
+                                    label="📥 1a. 下載 T24 正式報告 (車輛 甲/乙/丙)",
+                                    data=file,
+                                    file_name=out_t24_1,
+                                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                                )
+                        with col_dl2:
+                            if t17_stream:
+                                st.download_button(
+                                    label="🖼️ 2. 下載 IMSP-T17A 相片報告表 (XLSX)",
+                                    data=t17_stream,
+                                    file_name=f"IMSP-T17A_相片報告_{first_plate}.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                )
+                            else:
+                                st.warning("⚠️ 未能在 GitHub 找到 `T17_template.xlsx` 範本檔案。")
+
                         if os.path.exists(out_t24_1):
                             os.remove(out_t24_1)
 
@@ -800,7 +989,7 @@ if st.button(button_label):
                                 st.warning("⚠️ 檢測到超過 3 架車，但未在 GitHub 找到 `T24_template_2.docx`（續頁範本），已為你完成第一頁輸出。")
 
                 # 💬 2. WhatsApp 案件摘要分享按鈕
-                st.markdown(f'<a href="{wa_url}" target="_blank" class="wa-button">💬 2. 分享案件通報至 WhatsApp 群組</a>', unsafe_allow_html=True)
+                st.markdown(f'<a href="{wa_url}" target="_blank" class="wa-button">💬 分享案件通報至 WhatsApp 群組</a>', unsafe_allow_html=True)
                 
                 st.divider()
                 # 🔄 3. 重置按鈕
