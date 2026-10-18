@@ -362,7 +362,7 @@ if st.button(button_label, type="primary"):
                 
                 prompt = f"""
                 你是一個專業的香港交通意外資料提取助手。
-                請仔細分析所有上載相片與現場文字內容：
+                請仔細分析所有上載相片（行車證、駕駛執照、手填紙本紀錄 IMSP-T3、現場相片）與文字內容：
                 
                 【相片來源分類】：
                 {photo_notes}
@@ -370,13 +370,17 @@ if st.button(button_label, type="primary"):
                 【補充文字內容與口供】：
                 {statement}
                 
+                【🚘 香港車牌號碼 (plate_no) 強制100%完整提取要求】：
+                1. 必須仔細檢查行車證、車牌相片及 IMSP-T3 手填單上的完整車牌。
+                2. 香港車牌尾部經常帶有單個字母或數字（例如: UG8125 R, WA1062 Q, AB1234, AM8049, WW5031）。
+                3. 嚴禁裁切、漏掉或省略尾部字母/數字！必須將【整個車牌號碼完整字串】填入 plate_no (包括尾部空格及字母，如 "UG8125 R")！
+                
                 【📋 手填紀錄單 IMSP-T3 精準提取】：
                 1. 意外時間 (ta_time，如 1542)
                 2. vehicles 陣列：plate_no, vehicle_class_en, vehicle_class_zh
                 3. injured_total 受傷人數與 injured_list 傷者資料
                 4. tunnel_staff_arrived, police_arrived_time, police_no, police_veh_no, ai_staff_no, ai_arrived_time, ai_departed_time, rn_no, tunnel_staff_departed
                 
-                【🚘 車牌號碼】：完整提取含尾數！
                 【🌐 地址】：同時提供繁體中文 address_zh 與英文 address_en！
                 【🆔 證件】：hkid 尾數帶括號如 G111759(8)；driving_license_no 無括號！
                 
@@ -398,7 +402,7 @@ if st.button(button_label, type="primary"):
                     "breathalyzer_test": "PBT紀錄",
                     "vehicles": [
                         {{
-                            "plate_no": "車牌號碼",
+                            "plate_no": "車牌號碼 (必須100%完整含尾部字母，如 UG8125 R 或 WW5031)",
                             "vehicle_class_en": "英文車類",
                             "vehicle_class_zh": "中文車類",
                             "gross_weight": "總重",
