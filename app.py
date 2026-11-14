@@ -98,6 +98,28 @@ for key, default_val in state_keys.items():
     if key not in st.session_state:
         st.session_state[key] = default_val
 
+# Helper 函數：強制合併車牌號碼與行車證尾數 (雙重保險)
+def ensure_plate_with_suffix(plate_str, suffix_str):
+    p = str(plate_str or "").strip()
+    suf = str(suffix_str or "").strip()
+    if not p or p == "———":
+        return "———"
+    # 過濾無效的尾數值
+    if suf in ["", "———", "無", "None", "null", "N/A", "n/a"]:
+        return p
+    # 若提取出單一字母或數字尾數 (如 Q, R, S, A 等)
+    if len(suf) == 1 and suf.isalnum():
+        suf_up = suf.upper()
+        # 1. 若已經是 "UV2045 Q" 格式，直接返回
+        if p.upper().endswith(f" {suf_up}"):
+            return p
+        # 2. 若緊貼在數字後面如 "UV2045Q"，自動補空格變成 "UV2045 Q"
+        if re.search(r'\d' + re.escape(suf) + r'$', p, re.IGNORECASE):
+            return p[:-1].strip() + " " + suf_up
+        # 3. 若 plate_no 漏了尾數，強制補上 " Q"
+        return f"{p} {suf_up}"
+    return p
+
 # Helper 函數：身份證號碼尾數加上圓括號
 def format_hkid_parentheses(code_str):
     if not code_str:
@@ -223,30 +245,30 @@ app_mode = st.radio(
 
 st.divider()
 
-st.subheader("📸 2. 分類上載相片")
+st.subheader("📸 2. 分類上載相片 (支援行車證、駕照、手填紀錄單 IMSP-T3、現場照片)")
 tab_main, tab_veh_a, tab_veh_b, tab_veh_c = st.tabs([
     "📋 手填紀錄單 (IMSP-T3) / 現場照片",
-    "🚗 車輛 甲 相片",
-    "🚙 車輛 乙 相片",
-    "🚚 其他 / 車輛 丙 相片"
+    "🚗 車輛 甲 (Vehicle A) 相片",
+    "🚙 車輛 乙 (Vehicle B) 相片",
+    "🚚 其他 / 車輛 丙 (Vehicle C) 相片"
 ])
 
 with tab_main:
     files_main = st.file_uploader("請上載【手填紀錄單 (IMSP-T3) / 現場照片 / 總表】", type=["jpg", "png", "jpeg"], accept_multiple_files=True, key="main_files")
 
 with tab_veh_a:
-    files_veh_a = st.file_uploader("請上載【車輛 甲】行車證及駕照", type=["jpg", "png", "jpeg"], accept_multiple_files=True, key="veh_a_files")
+    files_veh_a = st.file_uploader("請上載【車輛 甲 (Vehicle A)】的行車證及司機駕駛執照", type=["jpg", "png", "jpeg"], accept_multiple_files=True, key="veh_a_files")
 
 with tab_veh_b:
-    files_veh_b = st.file_uploader("請上載【車輛 乙】行車證及駕照", type=["jpg", "png", "jpeg"], accept_multiple_files=True, key="veh_b_files")
+    files_veh_b = st.file_uploader("請上載【車輛 乙 (Vehicle B)】的行車證及司機駕駛執照", type=["jpg", "png", "jpeg"], accept_multiple_files=True, key="veh_b_files")
 
 with tab_veh_c:
-    files_veh_c = st.file_uploader("請上載【車輛 丙 或其他】相片", type=["jpg", "png", "jpeg"], accept_multiple_files=True, key="veh_c_files")
+    files_veh_c = st.file_uploader("請上載【車輛 丙 (Vehicle C) 或其他】相片", type=["jpg", "png", "jpeg"], accept_multiple_files=True, key="veh_c_files")
 
 st.divider()
 
 st.subheader("📝 3. 司機口供及補充文字 (可選填)")
-statement = st.text_area("請輸入額外口供、酒精測試結果或補充資料", height=100)
+statement = st.text_area("請輸入額外口供、酒精測試結果或補充資料 (若相片已包含所有資料，此處可留空)", height=100)
 
 def generate_tado_word(data, statement_text):
     if not docx: return None
@@ -345,16 +367,16 @@ if st.button(button_label, type="primary"):
         return imgs
 
     images_with_tags.extend(process_files(files_main, "手填紀錄單 (IMSP-T3)"))
-    images_with_tags.extend(process_files(files_veh_a, "車輛 甲"))
-    images_with_tags.extend(process_files(files_veh_b, "車輛 乙"))
-    images_with_tags.extend(process_files(files_veh_c, "車輛 丙"))
+    images_with_tags.extend(process_files(files_veh_a, "車輛 甲 (Vehicle A)"))
+    images_with_tags.extend(process_files(files_veh_b, "車輛 乙 (Vehicle B)"))
+    images_with_tags.extend(process_files(files_veh_c, "車輛 丙 (Vehicle C)"))
 
     if not api_key:
         st.error("請先輸入或設定 Gemini API Key！")
     elif not images_with_tags and not statement:
         st.error("請最少上載一張相片或輸入文字資料！")
     else:
-        with st.spinner('AI 正在全方位辨識並生成報告...'):
+        with st.spinner('AI 正在全方位辨識（包含行車證尾數雙重鎖定與 IMSP-T3 對齊）...'):
             try:
                 client = genai.Client(api_key=api_key.strip())
                 raw_images = [item[0] for item in images_with_tags]
@@ -362,7 +384,7 @@ if st.button(button_label, type="primary"):
                 
                 prompt = f"""
                 你是一個專業的香港交通意外資料提取助手。
-                請仔細分析所有上載相片（行車證、駕駛執照、手填紙本紀錄 IMSP-T3、現場相片）與文字內容：
+                請仔細分析所有上載的相片（特別是東隧事故處理程序 IMSP-T3 手填紙本紀錄、香港車輛牌照/行車證、駕駛執照、現場照片）以及現場文字內容：
                 
                 【相片來源分類】：
                 {photo_notes}
@@ -370,73 +392,102 @@ if st.button(button_label, type="primary"):
                 【補充文字內容與口供】：
                 {statement}
                 
-                【🚘 香港車牌號碼 (plate_no) 強制100%完整提取要求】：
-                1. 必須仔細檢查行車證、車牌相片及 IMSP-T3 手填單上的完整車牌。
-                2. 香港車牌尾部經常帶有單個字母或數字（例如: UG8125 R, WA1062 Q, AB1234, AM8049, WW5031）。
-                3. 嚴禁裁切、漏掉或省略尾部字母/數字！必須將【整個車牌號碼完整字串】填入 plate_no (包括尾部空格及字母，如 "UG8125 R")！
+                【🚘 香港行車證「車牌尾數」雙重強制提取要求（最高優先級！）】：
+                1. 在香港「車輛牌照 (行車證 / Vehicle Licence)」上，「車輛登記號碼 (REGISTRATION MARK)」一欄中，車牌號碼（例如 UV2045、UG8125、WA1062）的右方隔開一段空白位置，會印有一個獨立的英文字母或數字（例如 Q、R、S、A 等，俗稱「行車證尾數」）。
+                2. 重要規則：即使「IMSP-T3 手填紀錄單」或「車頭/車尾相片」只寫了基本車牌（無寫尾數），只要該車輛有上載「行車證」，就必須以行車證為準，100% 提取該右方尾數！
+                3. 你必須同時將該尾數單獨填入 `plate_suffix` 欄位（例如 `"Q"` 或 `"R"`），並將完整車牌連尾數填入 `plate_no`（例如 `"UV2045 Q"`）。絕對不可以漏掉！
                 
-                【📋 手填紀錄單 IMSP-T3 精準提取】：
-                1. 意外時間 (ta_time，如 1542)
-                2. vehicles 陣列：plate_no, vehicle_class_en, vehicle_class_zh
-                3. injured_total 受傷人數與 injured_list 傷者資料
-                4. tunnel_staff_arrived, police_arrived_time, police_no, police_veh_no, ai_staff_no, ai_arrived_time, ai_departed_time, rn_no, tunnel_staff_departed
+                【📋 手填紀錄單 IMSP-T3 頂部與表格欄位精準提取加強對應】：
+                1. 頂部「事故發生時間」：提取意外時間 (ta_time，如 1542)。
+                2. 頂部「車輛：」欄位 (如 "P/C 8161 / M/C WW 5031")：
+                   - P/C 代表 PRIVATE CAR (私家車)
+                   - M/C 代表 MOTORCYCLE (電單車)
+                   - L/G/V 或 LGV 代表 LIGHT GOODS VEHICLE (輕型貨車)
+                   - H/G/V 代表 HEAVY GOODS VEHICLE (重型貨車)
+                   - 請將提取出的車輛類型對應補入 vehicles 陣列的 vehicle_class_en, vehicle_class_zh（車牌若行車證有尾數，必須保留行車證尾數）！
+                3. 頂部「受傷人數：」及上方手寫註記 (如 "M/C WW5031 司機" 或 "P/C 8161 乘客")：
+                   - injured_total: 受傷人數 (如 1)
+                   - 請解析手寫文字中的涉及車牌與受傷者身份，寫入 injured_list 傷者資料 (vehicle_no, escort/notes)！
+                4. 表格項目 1「東隧職員發現/到達現場時間」: tunnel_staff_arrived
+                5. 表格項目 8「警方到達時間」: police_arrived_time
+                6. 表格項目 8「警員編號」: police_no (普通軍裝警員編號，如 19626)
+                7. 表格項目 8 或 11「車牌」: police_veh_no (警車車牌，如 AM8049 / AM2795)
+                8. 表格項目 11「警方 AI 到達時間」: ai_arrived_time
+                9. 表格項目 11「警方 AI 警員編號」: ai_staff_no (如 PC14367)
+                10. 表格項目 11「警方 AI 離開時間」: ai_departed_time
+                11. 表格項目 12「警方檔案編號」: rn_no (如 RN=13913)
+                12. 表格項目 19「所有肇事車輛及政府人員離開」: tunnel_staff_departed (如 1648)
                 
-                【🌐 地址】：同時提供繁體中文 address_zh 與英文 address_en！
-                【🆔 證件】：hkid 尾數帶括號如 G111759(8)；driving_license_no 無括號！
+                【🌐 地址雙向翻譯強制要求 (100% 必須完成)】：
+                1. 司機及傷者的住址：相片中不論提供的是中文住址還是英文住址，你必須同時生成：
+                   - address_zh：完整繁體中文住址 (若原本是英文，必須精準翻譯成繁體中文)。
+                   - address_en：完整英文住址 (若原本是中文，必須精準翻譯成英文)。
+                2. 絕對不可留空或填寫 N/A！兩者必須同時填滿。
+                
+                【🆔 證件號碼與期滿日期要求】：
+                1. 身份證號碼 (hkid)：最後一個校驗碼數字或字母必須使用圓括號 ( ) 括住，例如 G111759(8) 或 Y463269(7)。
+                2. 駕駛執照號碼 (driving_license_no)：請照實提取，尾數【絕對不要添加括號】(例如 Y463269 7)。
+                3. dl_expiry_date (駕駛執照期滿日期)：駕駛執照上的有效期/屆滿日期 (如 DD/MM/YYYY 或 DD-MM-YYYY)。
+                
+                【受傷者 (Injured) 詳細資料與電話號碼提取】：
+                1. injured_total: 受傷者合共人數 (無人受傷填 "0")。
+                2. injured_list: 傷者列表陣列 (最多 4 人)，必須完整提取：
+                   - name_en, name_zh, age, address_zh, address_en, phone, vehicle_no, hospital, escort
                 
                 請嚴格以 JSON 格式輸出：
                 {{
-                    "log_no": "紀錄號碼",
-                    "rn_no": "RN報案號碼",
+                    "log_no": "Log No 紀錄號碼",
+                    "rn_no": "HKP RN 報案號碼/案號 (如 RN:13913)",
                     "ta_date": "意外日期",
-                    "ta_time": "意外時間",
+                    "ta_time": "意外時間 (如 1542)",
                     "location": "意外地點",
-                    "tunnel_staff_arrived": "到達時間",
-                    "tunnel_staff_departed": "離開時間",
-                    "police_arrived_time": "警察到達時間",
-                    "police_no": "警員編號",
-                    "ai_staff_no": "AI警員編號",
-                    "ai_arrived_time": "AI到達時間",
-                    "ai_departed_time": "AI離開時間",
-                    "police_veh_no": "警車車牌",
-                    "breathalyzer_test": "PBT紀錄",
+                    "tunnel_staff_arrived": "隧道職員到達時間 (如 1542)",
+                    "tunnel_staff_departed": "隧道職員離開時間 (如 1648)",
+                    "police_arrived_time": "警察到達時間 (如 1604)",
+                    "police_no": "普通警員編號 (如 19626)",
+                    "ai_staff_no": "交通意外調查組人員編號 (如 PC14367)",
+                    "ai_arrived_time": "HKP AI 到達時間 (如 1616)",
+                    "ai_departed_time": "HKP AI 離開時間 (如 1640)",
+                    "police_veh_no": "警車車牌 (如 AM8049)",
+                    "breathalyzer_test": "酒精呼氣測試紀錄",
                     "vehicles": [
                         {{
-                            "plate_no": "車牌號碼 (必須100%完整含尾部字母，如 UG8125 R 或 WW5031)",
-                            "vehicle_class_en": "英文車類",
-                            "vehicle_class_zh": "中文車類",
-                            "gross_weight": "總重",
-                            "make": "廠名",
-                            "color": "顏色",
-                            "transaction_no": "存檔號",
-                            "expiry_date": "屆滿日",
+                            "plate_no": "完整車牌號碼連行車證尾數 (如 UV2045 Q 或 UG8125 R)",
+                            "plate_suffix": "行車證上車牌右方隔開的單一尾數字母或數字 (如 Q, R, S；必須仔細查看行車證右上車牌欄右邊提取，無行車證則填空字串)",
+                            "vehicle_class_en": "英文車輛類別 (如 PRIVATE CAR)",
+                            "vehicle_class_zh": "中文車輛類別 (如 私家車)",
+                            "gross_weight": "總重量",
+                            "make": "車輛廠名 (如 TOYOTA)",
+                            "color": "車輛顏色",
+                            "transaction_no": "存檔編號",
+                            "expiry_date": "屆滿日期 (無則 ———)",
                             "seating_capacity": "載客額",
-                            "damage": "損毀情況",
-                            "driver_name_en": "司機英文名",
-                            "driver_name_zh": "司機中文名",
+                            "damage": "車輛損毀情況",
+                            "driver_name_en": "司機英文姓名",
+                            "driver_name_zh": "司機中文姓名",
                             "age": "年齡",
-                            "phone": "電話",
-                            "hkid": "身份證",
-                            "driving_license_no": "駕照號碼",
-                            "dl_class": "駕照類別",
-                            "dl_expiry_date": "駕照屆滿日",
-                            "address_zh": "中文地址",
-                            "address_en": "英文地址",
+                            "phone": "電話號碼",
+                            "hkid": "身份證號碼 (尾數帶括號，如 G111759(8))",
+                            "driving_license_no": "駕駛執照號碼 (無括號，如 Y463269 7)",
+                            "dl_class": "駕照 Full Class (如 1, 2)",
+                            "dl_expiry_date": "駕駛執照期滿日期 (如 DD/MM/YYYY)",
+                            "address_zh": "完整中文住址",
+                            "address_en": "完整英文住址",
                             "driver_statement": "司機口供"
                         }}
                     ],
-                    "injured_total": "受傷人數",
+                    "injured_total": "受傷者合共人數 (如 1)",
                     "injured_list": [
                         {{
-                            "name_en": "英文名",
-                            "name_zh": "中文名",
+                            "name_en": "傷者英文名",
+                            "name_zh": "傷者中文名",
                             "age": "年齡",
-                            "address_zh": "中文地址",
-                            "address_en": "英文地址",
-                            "phone": "電話",
-                            "vehicle_no": "車牌",
-                            "hospital": "醫院",
-                            "escort": "備註"
+                            "address_zh": "中文住址",
+                            "address_en": "英文住址",
+                            "phone": "電話號碼",
+                            "vehicle_no": "涉及車牌號碼",
+                            "hospital": "送往醫院",
+                            "escort": "身份備註"
                         }}
                     ]
                 }}
@@ -468,8 +519,12 @@ if st.button(button_label, type="primary"):
                 
                 data = json.loads(response.text)
                 vehicles_list = data.get('vehicles', [])
-                first_plate = vehicles_list[0].get('plate_no', 'Unknown').replace(' ', '_') if len(vehicles_list) > 0 else 'Unknown'
                 
+                # 🔥 Python 強制合併車牌與行車證尾數 (確保 100% 不會漏尾數)
+                for v in vehicles_list:
+                    v['plate_no'] = ensure_plate_with_suffix(v.get('plate_no', ''), v.get('plate_suffix', ''))
+
+                first_plate = vehicles_list[0].get('plate_no', 'Unknown').replace(' ', '_') if len(vehicles_list) > 0 else 'Unknown'
                 date_std, date_zh, weekday_zh = parse_date_and_weekday(data.get('ta_date', ''))
 
                 # 1. 生成 TADO Word 附錄 Bytes
