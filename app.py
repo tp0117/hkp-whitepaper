@@ -82,6 +82,7 @@ st.markdown("""
 state_keys = {
     "generated": False,
     "current_mode": "",
+    "used_model": "",
     "main_bytes": None,
     "main_filename": "",
     "main_mime": "",
@@ -104,19 +105,14 @@ def ensure_plate_with_suffix(plate_str, suffix_str):
     suf = str(suffix_str or "").strip()
     if not p or p == "———":
         return "———"
-    # 過濾無效的尾數值
     if suf in ["", "———", "無", "None", "null", "N/A", "n/a"]:
         return p
-    # 若提取出單一字母或數字尾數 (如 Q, R, S, A 等)
     if len(suf) == 1 and suf.isalnum():
         suf_up = suf.upper()
-        # 1. 若已經是 "UV2045 Q" 格式，直接返回
         if p.upper().endswith(f" {suf_up}"):
             return p
-        # 2. 若緊貼在數字後面如 "UV2045Q"，自動補空格變成 "UV2045 Q"
         if re.search(r'\d' + re.escape(suf) + r'$', p, re.IGNORECASE):
             return p[:-1].strip() + " " + suf_up
-        # 3. 若 plate_no 漏了尾數，強制補上 " Q"
         return f"{p} {suf_up}"
     return p
 
@@ -222,9 +218,10 @@ with st.sidebar:
     
     st.divider()
     selected_model = st.selectbox(
-        "🤖 首選 AI 模型",
-        ["gemini-3.8-flash", "gemini-1.5-flash", "gemini-2.5-pro"],
-        index=0
+        "🤖 首選 AI 模型 (塞車時自動降級至備用模型)",
+        ["gemini-4-hydrogen", "gemini-3.8-flash", "gemini-1.5-flash", "gemini-2.5-pro"],
+        index=0,
+        help="優先使用最新 gemini-4-hydrogen；若遇伺服器繁忙或異常，系統將自動無縫切換至下一個模型，不會中斷工作。"
     )
     
     st.divider()
@@ -376,7 +373,7 @@ if st.button(button_label, type="primary"):
     elif not images_with_tags and not statement:
         st.error("請最少上載一張相片或輸入文字資料！")
     else:
-        with st.spinner('AI 正在全方位辨識（包含行車證尾數雙重鎖定與 IMSP-T3 對齊）...'):
+        with st.spinner('AI 正在全方位辨識（優先使用 Gemini 4 Hydrogen，遇忙自動無縫切換備用模型）...'):
             try:
                 client = genai.Client(api_key=api_key.strip())
                 raw_images = [item[0] for item in images_with_tags]
@@ -494,9 +491,18 @@ if st.button(button_label, type="primary"):
                 """
                 
                 contents = raw_images + [prompt]
-                candidate_models = list(dict.fromkeys([selected_model, "gemini-1.5-flash", "gemini-2.5-pro"]))
+                
+                # 🛡️ 4 層無縫自動降級清單：優先使用所選模型 (預設 gemini-4-hydrogen)，若失敗自動依序嘗試所有現有模型
+                candidate_models = list(dict.fromkeys([
+                    selected_model,
+                    "gemini-4-hydrogen",
+                    "gemini-3.8-flash",
+                    "gemini-1.5-flash",
+                    "gemini-2.5-pro"
+                ]))
                 
                 response = None
+                used_model_name = ""
                 last_exception = None
 
                 for m_name in candidate_models:
@@ -508,14 +514,16 @@ if st.button(button_label, type="primary"):
                         )
                         if res and res.text:
                             response = res
+                            used_model_name = m_name
                             break
                     except Exception as e:
+                        # 靜音捕捉錯誤並立即切換至下一個備用模型，不中斷工作
                         last_exception = e
-                        time.sleep(1)
+                        time.sleep(0.5)
                         continue
 
                 if not response or not response.text:
-                    raise last_exception if last_exception else Exception("無法從 Google API 取得回應，請稍後再試。")
+                    raise last_exception if last_exception else Exception("所有備用模型暫時均無法回應，請稍後再試。")
                 
                 data = json.loads(response.text)
                 vehicles_list = data.get('vehicles', [])
@@ -709,6 +717,7 @@ if st.button(button_label, type="primary"):
                 wa_text = f"🚓【交通意外報告已生成】\n• RN編號：{data.get('rn_no', '無')}\n• 意外時間：{data.get('ta_time', '無')}\n• 涉及車牌：{first_plate}\n• 模式：{app_mode.split(' ')[0]}\n請在附件接收報告檔。"
                 
                 st.session_state["current_mode"] = app_mode
+                st.session_state["used_model"] = used_model_name
                 st.session_state["main_bytes"] = main_bytes
                 st.session_state["main_filename"] = main_filename
                 st.session_state["main_mime"] = main_mime
@@ -732,7 +741,9 @@ if st.session_state.get("generated"):
     st.subheader("📊 AI 自動提取與精準對齊預覽：")
     st.json(st.session_state["preview_data"])
     
-    st.success("🎉 報告生成成功！手機用戶建議點擊【📦 一鍵打包下載】，一次過將所有報告存入手機：")
+    used_m = st.session_state.get("used_model", "")
+    model_badge = f"（⚡ 本次由 `{used_m}` 模型成功處理）" if used_m else ""
+    st.success(f"🎉 報告生成成功！{model_badge} 手機用戶建議點擊【📦 一鍵打包下載】，一次過將所有報告存入手機：")
     
     cur_mode = st.session_state.get("current_mode", "")
     
